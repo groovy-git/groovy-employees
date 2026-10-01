@@ -1,0 +1,131 @@
+import { useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
+import { useApp } from "../store";
+import { api } from "../lib/api";
+import { Button, Field, Sheet } from "../components/ui";
+
+export default function Login() {
+  const { login, toast } = useApp();
+  const [email, setEmail] = useState(() => localStorage.getItem("ge_last_email") || "");
+  const [pwd, setPwd] = useState("");
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [forgot, setForgot] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErr("");
+    setBusy(true);
+    try {
+      localStorage.setItem("ge_last_email", email.trim());
+      await login(email.trim(), pwd);
+    } catch (ex) {
+      setErr(ex.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="login">
+      <img className="logo" src="./logo.svg" alt="Groovy" />
+      <div className="tagline">Groovy Employees</div>
+      <form className="card" onSubmit={submit}>
+        <h2 style={{ marginBottom: 16 }}>Admin login</h2>
+        <Field label="Email">
+          <input className="input" type="email" autoComplete="username" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        </Field>
+        <Field label="Password" error={err}>
+          <div className="input-wrap">
+            <input className="input" type={show ? "text" : "password"} autoComplete="current-password" value={pwd} onChange={(e) => setPwd(e.target.value)} required />
+            <button type="button" className="icon-btn suffix-btn" onClick={() => setShow(!show)} aria-label={show ? "Hide password" : "Show password"}>
+              {show ? <EyeOff size={20} /> : <Eye size={20} />}
+            </button>
+          </div>
+        </Field>
+        <Button className="block big" loading={busy} type="submit">
+          Log in
+        </Button>
+        <button type="button" className="btn ghost block mt" onClick={() => setForgot(true)}>
+          Forgot password?
+        </button>
+      </form>
+      <ForgotSheet open={forgot} onClose={() => setForgot(false)} defaultEmail={email} toast={toast} />
+    </div>
+  );
+}
+
+function ForgotSheet({ open, onClose, defaultEmail, toast }) {
+  const [step, setStep] = useState(1);
+  const [email, setEmail] = useState(defaultEmail);
+  const [otp, setOtp] = useState("");
+  const [pwd, setPwd] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const run = async (fn) => {
+    setErr("");
+    setBusy(true);
+    try {
+      await fn();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Reset password">
+      {step === 1 ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            run(async () => {
+              const r = await api("forgotPassword", { email: email.trim() });
+              toast(r.message, "success", 4000);
+              setStep(2);
+            });
+          }}
+        >
+          {/* conditional on purpose: the server never says whether an address is registered, so this
+              must not promise a code that a typo will never receive */}
+          <p className="muted small" style={{ marginTop: 0 }}>We'll send a 6-digit code if this email belongs to an admin login.</p>
+          <Field label="Email" error={err}>
+            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          </Field>
+          <Button className="block" loading={busy} type="submit">Send code</Button>
+        </form>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            run(async () => {
+              const r = await api("resetPassword", { email: email.trim(), otp, password: pwd });
+              toast(r.message, "success");
+              setStep(1);
+              onClose();
+            });
+          }}
+        >
+          {/* the condition stays on screen: the toast saying it is gone in four seconds, and a typo
+              otherwise leaves you waiting on this step for a code that was never sent */}
+          <p className="muted small" style={{ marginTop: 0 }}>
+            If <b>{email.trim()}</b> is registered, the code is on its way. Nothing in a minute? The address may be wrong.
+          </p>
+          <Field label="6-digit code from email">
+            <input className="input" inputMode="numeric" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} required />
+          </Field>
+          <Field label="New password" hint="At least 6 characters" error={err}>
+            <input className="input" type="password" autoComplete="new-password" value={pwd} onChange={(e) => setPwd(e.target.value)} minLength={6} required />
+          </Field>
+          <Button className="block" loading={busy} type="submit">Change password</Button>
+          <button type="button" className="btn ghost block mt" onClick={() => { setErr(""); setOtp(""); setStep(1); }}>
+            Use a different email
+          </button>
+        </form>
+      )}
+    </Sheet>
+  );
+}
