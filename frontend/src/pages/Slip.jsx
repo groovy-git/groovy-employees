@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { runBusy } from "../lib/busy";
 import { goBack, navigate } from "../lib/router";
 import { fmtDateTime } from "../lib/format";
-import { daysLabel, slipFigures, validDaysOff } from "../lib/slip";
+import { daysLabel, eventDaysLabel, slipFigures, validDaysOff } from "../lib/slip";
 import { copyText, printHtml, slipPrintHtml, whatsappLink, whatsappText } from "../lib/print";
 import TopBar from "../components/TopBar";
 import { Avatar, Button, Empty, Field, MoneyInput, Sheet, SkeletonList, useConfirm } from "../components/ui";
@@ -15,14 +15,17 @@ import SlipBadge from "../components/SlipBadge";
 // what the editor holds, from a slip as the server sent it
 function formOf(d) {
   const auto = (category) => d.items.find((i) => i.auto && i.category === category);
-  // an amount on a days-off line that differs from the worked-out one was typed in by the admin
+  // an amount on one of the app's own lines that differs from the worked-out one was typed in by the admin
   const typed = (item, worked) => (item && item.amount !== worked ? String(item.amount) : "");
   return {
     base: String(d.slip.base_salary),
     daysOff: String(d.slip.days_off),
+    eventDays: String(d.slip.event_days || 0),
+    eventRate: d.slip.event_rate ? String(d.slip.event_rate) : "",
     items: d.items.filter((i) => !i.auto).map((i) => ({ kind: i.kind, category: i.category, label: i.label, amount: i.amount })),
     leaveAmount: typed(auto("Unpaid leave"), d.auto.leave_amount),
     holidayAmount: typed(auto("Holiday not taken"), d.auto.holiday_amount),
+    eventAmount: typed(auto("Event pay"), d.auto.event_amount),
     notes: d.slip.notes || "",
   };
 }
@@ -95,17 +98,32 @@ function DraftSlip({ d, setD }) {
   const [confirm, confirmNode] = useConfirm();
   const dirty = JSON.stringify(f) !== saved;
 
+  // paid only for event days: no base and no days off on this slip
+  const eventPaid = s.pay_type === "event";
   const fig = useMemo(
-    () => slipFigures({ base: f.base, salaryDays: s.salary_days, paidHolidays: s.paid_holidays, daysOff: f.daysOff, items: f.items, leaveAmount: f.leaveAmount, holidayAmount: f.holidayAmount }),
-    [f, s.salary_days, s.paid_holidays],
+    () =>
+      slipFigures({
+        base: f.base, salaryDays: s.salary_days, paidHolidays: s.paid_holidays, daysOff: f.daysOff, items: f.items,
+        leaveAmount: f.leaveAmount, holidayAmount: f.holidayAmount,
+        eventPaid, eventDays: f.eventDays, eventRate: f.eventRate, eventAmount: f.eventAmount,
+      }),
+    [f, s.salary_days, s.paid_holidays, eventPaid],
   );
-  const daysOk = validDaysOff(f.daysOff);
-  const baseOk = f.base !== "" && Number(f.base) >= 0;
+  const daysOk = eventPaid || validDaysOff(f.daysOff);
+  const baseOk = eventPaid || (f.base !== "" && Number(f.base) >= 0);
+  const eventOk = validDaysOff(f.eventDays);
+  // event days need a rate, unless the amount itself was typed in
+  const rateOk = !(fig.eventDays > 0) || fig.eventRate > 0 || f.eventAmount !== "";
+  // no base and nothing earned: an event slip with no days on it yet
+  const nothing = !(Number(eventPaid ? 0 : f.base) > 0) && !(fig.earnings > 0);
 
-  // the worked-out amounts follow the base and the days off; changing either drops a typed-over amount
+  // the worked-out amounts follow what they are worked out from; changing that drops a typed-over amount
   const setBase = (v) => setF({ ...f, base: v, leaveAmount: "", holidayAmount: "" });
   const setDays = (v) => setF({ ...f, daysOff: v, leaveAmount: "", holidayAmount: "" });
   const stepDays = (by) => setDays(String(Math.max(0, Math.min(31, (Number(f.daysOff) || 0) + by))));
+  const setEventDays = (v) => setF({ ...f, eventDays: v, eventAmount: "" });
+  const setEventRate = (v) => setF({ ...f, eventRate: v, eventAmount: "" });
+  const stepEventDays = (by) => setEventDays(String(Math.max(0, Math.min(31, (Number(f.eventDays) || 0) + by))));
 
   const adopt = (data) => {
     setD(data);
@@ -114,7 +132,11 @@ function DraftSlip({ d, setD }) {
   };
 
   const save = useCallback(async () => {
-    const r = await api("saveSlip", { id: s.id, base_salary: f.base, days_off: f.daysOff, items: f.items, leave_amount: f.leaveAmount, holiday_amount: f.holidayAmount, notes: f.notes });
+    const r = await api("saveSlip", {
+      id: s.id, base_salary: f.base, days_off: f.daysOff, items: f.items, notes: f.notes,
+      leave_amount: f.leaveAmount, holiday_amount: f.holidayAmount,
+      event_days: f.eventDays, event_rate: f.eventRate === "" ? 0 : f.eventRate, event_amount: f.eventAmount,
+    });
     adopt(r.data);
     return r;
   }, [f, s.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -122,6 +144,8 @@ function DraftSlip({ d, setD }) {
   const run = async (label, fn) => {
     if (!baseOk) return toast("Enter the base salary", "error");
     if (!daysOk) return toast("Days off must be in whole or half days, 0 to 31", "error");
+    if (!eventOk) return toast("Event days must be in whole or half days, 0 to 31", "error");
+    if (!rateOk) return toast("Enter the rate for an event day", "error");
     setBusy(true);
     try {
       await runBusy(label, fn);
@@ -157,13 +181,12 @@ function DraftSlip({ d, setD }) {
           ? "Paid holiday taken — nothing added or deducted."
           : "No days off.";
 
-  // a line the app writes from the days off; its amount can be typed over
-  const autoRow = (label, days, value, worked, key) => (
+  // a line the app writes itself (from the days off, or the event days); its amount can be typed over.
+  // `sum` says what it was worked out from, e.g. "₹500 a day × 2".
+  const autoRow = (title, sum, value, worked, key) => (
     <div className="line-row">
       <div className="grow">
-        <div className="bold">
-          {label} ({daysLabel(days)})
-        </div>
+        <div className="bold">{title}</div>
         <div className="tiny muted">
           {value !== "" && Number(value) !== worked ? (
             <>
@@ -173,14 +196,42 @@ function DraftSlip({ d, setD }) {
               </button>
             </>
           ) : (
-            `${inr(fig.perDay)} a day × ${days}`
+            sum
           )}
         </div>
       </div>
       <div className="amt">
-        <MoneyInput value={value !== "" ? value : String(worked)} onChange={(v) => setF({ ...f, [key]: v })} aria-label={label + " amount"} />
+        <MoneyInput value={value !== "" ? value : String(worked)} onChange={(v) => setF({ ...f, [key]: v })} aria-label={title + " amount"} />
       </div>
     </div>
+  );
+  const leaveRow = (title, days, value, worked, key) => autoRow(`${title} (${daysLabel(days)})`, `${inr(fig.perDay)} a day × ${days}`, value, worked, key);
+
+  // how many event days, and what one pays. Everyone can have these; for someone paid per event day
+  // they are the whole slip.
+  const eventFields = (
+    <>
+      <Field
+        label={eventPaid ? "Event days worked" : "Event days worked (if any)"}
+        hint={!eventOk ? null : fig.eventDays > 0 ? `${eventDaysLabel(fig.eventDays)} × ${inr(fig.eventRate)} = ${inr(fig.eventAuto)}` : eventPaid ? "Enter the days worked this month." : "Paid on top of the base salary."}
+        error={eventOk ? null : "Whole or half days, 0 to 31"}
+      >
+        <div className="row">
+          <button type="button" className="icon-btn soft" onClick={() => stepEventDays(-1)} aria-label="One event day less">
+            <Minus size={18} />
+          </button>
+          <input className="input center" style={{ width: 96 }} inputMode="decimal" value={f.eventDays} onChange={(e) => setEventDays(e.target.value.replace(/[^\d.]/g, ""))} aria-label="Event days worked" />
+          <button type="button" className="icon-btn soft" onClick={() => stepEventDays(1)} aria-label="One event day more">
+            <Plus size={18} />
+          </button>
+        </div>
+      </Field>
+      {(eventPaid || fig.eventDays > 0) && (
+        <Field label="Rate per event day" hint="For this slip. Their usual rate is on their profile." error={rateOk ? null : "Enter the rate for an event day"}>
+          <MoneyInput value={f.eventRate} onChange={setEventRate} />
+        </Field>
+      )}
+    </>
   );
 
   return (
@@ -199,45 +250,57 @@ function DraftSlip({ d, setD }) {
         <Header d={d} />
 
         <div className="card">
-          <Field label="Base salary for the month" hint={`One day's salary: ${inr(fig.perDay)} (base ÷ ${s.salary_days})`} error={baseOk ? null : "Enter the base salary"}>
-            <MoneyInput value={f.base} onChange={setBase} />
-          </Field>
-          <Field label="Days off taken" hint={daysNote} error={daysOk ? null : "Whole or half days, 0 to 31"}>
-            <div className="row">
-              <button type="button" className="icon-btn soft" onClick={() => stepDays(-0.5)} aria-label="Half a day less">
-                <Minus size={18} />
-              </button>
-              <input className="input center" style={{ width: 96 }} inputMode="decimal" value={f.daysOff} onChange={(e) => setDays(e.target.value.replace(/[^\d.]/g, ""))} aria-label="Days off taken" />
-              <button type="button" className="icon-btn soft" onClick={() => stepDays(0.5)} aria-label="Half a day more">
-                <Plus size={18} />
-              </button>
-            </div>
-          </Field>
+          {eventPaid ? (
+            <div className="small muted mb">Paid per event day: no base salary and no days off on this slip.</div>
+          ) : (
+            <>
+              <Field label="Base salary for the month" hint={`One day's salary: ${inr(fig.perDay)} (base ÷ ${s.salary_days})`} error={baseOk ? null : "Enter the base salary"}>
+                <MoneyInput value={f.base} onChange={setBase} />
+              </Field>
+              <Field label="Days off taken" hint={daysNote} error={daysOk ? null : "Whole or half days, 0 to 31"}>
+                <div className="row">
+                  <button type="button" className="icon-btn soft" onClick={() => stepDays(-0.5)} aria-label="Half a day less">
+                    <Minus size={18} />
+                  </button>
+                  <input className="input center" style={{ width: 96 }} inputMode="decimal" value={f.daysOff} onChange={(e) => setDays(e.target.value.replace(/[^\d.]/g, ""))} aria-label="Days off taken" />
+                  <button type="button" className="icon-btn soft" onClick={() => stepDays(0.5)} aria-label="Half a day more">
+                    <Plus size={18} />
+                  </button>
+                </div>
+              </Field>
+            </>
+          )}
+          {eventFields}
         </div>
 
         <div className="section-label">Earnings</div>
         <div className="card" style={{ padding: "4px 14px" }}>
-          <div className="line-row">
-            <div className="grow bold">Base salary</div>
-            <b className="money">{inr(Number(f.base) || 0)}</b>
-          </div>
+          {!eventPaid && (
+            <div className="line-row">
+              <div className="grow bold">Base salary</div>
+              <b className="money">{inr(Number(f.base) || 0)}</b>
+            </div>
+          )}
+          {fig.eventDays > 0 && eventOk && autoRow(`Event pay (${eventDaysLabel(fig.eventDays)})`, `${inr(fig.eventRate)} a day × ${fig.eventDays}`, f.eventAmount, fig.eventAuto, "eventAmount")}
           <LineList kind="earning" lines={f.items} onChange={(items) => setF({ ...f, items })}>
-            {fig.unused > 0 && autoRow("Holiday not taken", fig.unused, f.holidayAmount, fig.holidayAuto, "holidayAmount")}
+            {fig.unused > 0 && leaveRow("Holiday not taken", fig.unused, f.holidayAmount, fig.holidayAuto, "holidayAmount")}
           </LineList>
         </div>
 
         <div className="section-label">Deductions</div>
         <div className="card" style={{ padding: "4px 14px" }}>
           <LineList kind="deduction" lines={f.items} onChange={(items) => setF({ ...f, items })}>
-            {fig.unpaid > 0 && autoRow("Unpaid leave", fig.unpaid, f.leaveAmount, fig.leaveAuto, "leaveAmount")}
+            {fig.unpaid > 0 && leaveRow("Unpaid leave", fig.unpaid, f.leaveAmount, fig.leaveAuto, "leaveAmount")}
           </LineList>
         </div>
 
         <div className="card mt">
-          <div className="kv">
-            <span className="k">Base salary</span>
-            <span className="money">{inr(Number(f.base) || 0)}</span>
-          </div>
+          {!eventPaid && (
+            <div className="kv">
+              <span className="k">Base salary</span>
+              <span className="money">{inr(Number(f.base) || 0)}</span>
+            </div>
+          )}
           <div className="kv">
             <span className="k">Earnings</span>
             <span className="money ok-text">+{inr(fig.earnings)}</span>
@@ -251,6 +314,7 @@ function DraftSlip({ d, setD }) {
             <span className={"money" + (fig.net < 0 ? " bad-text" : "")}>{inr(fig.net)}</span>
           </div>
           {fig.net < 0 && <div className="small bad-text">Deductions are more than the salary. Lower one, or carry part of it to next month.</div>}
+          {nothing && <div className="small muted">Nothing to pay yet. Enter the event days worked, or delete this draft if they didn't work this month.</div>}
         </div>
 
         <div className="card">
@@ -267,7 +331,7 @@ function DraftSlip({ d, setD }) {
         <button className="btn secondary" disabled={busy || !dirty} onClick={() => run("Saving draft…", async () => toast((await save()).message, "success"))}>
           {dirty ? "Save draft" : "Saved"}
         </button>
-        <button className="btn" disabled={busy || fig.net < 0} onClick={() => run("Saving draft…", async () => { if (dirty) await save(); setFinalize(true); })}>
+        <button className="btn" disabled={busy || fig.net < 0 || nothing} onClick={() => run("Saving draft…", async () => { if (dirty) await save(); setFinalize(true); })}>
           Finalize
         </button>
       </div>

@@ -50,26 +50,44 @@ function amountOr_(v, auto) {
  * days off beyond those are unpaid leave (a deduction), and a holiday not taken is paid as extra days
  * (an earning). Both of those lines are written here, from the days off; `over` carries an amount the
  * admin typed over either of them. `manual` are the lines the admin added.
+ *
+ * `ev` is the event work: { type, days, rate }. Days worked at events are paid at a daily rate, as one
+ * more line written here — for anyone, on top of a base if they have one. Someone of type "event" is
+ * paid only that way: they have no base, so there is no day's salary and the holiday rule has nothing
+ * to work on; their slip carries no days off and neither of those two lines.
  */
-function computeSlip_(base, salaryDays, paidHolidays, daysOff, manual, over) {
-    base = r2_(num_(base));
+function computeSlip_(base, salaryDays, paidHolidays, daysOff, manual, over, ev) {
+    over = over || {};
+    ev = ev || {};
+    const eventPaid = ev.type === "event";
+    base = eventPaid ? 0 : r2_(num_(base));
     salaryDays = num_(salaryDays);
-    paidHolidays = num_(paidHolidays);
-    daysOff = parseFloat(daysOff);
+    paidHolidays = eventPaid ? 0 : num_(paidHolidays);
+    daysOff = eventPaid ? 0 : parseFloat(daysOff);
+    const blank = (v) => v === undefined || v === null || v === "";
+    const eventDays = blank(ev.days) ? 0 : parseFloat(ev.days);
+    const eventRate = blank(ev.rate) ? 0 : r2_(parseFloat(ev.rate));
     if (!(base >= 0)) fail_("Base salary must be 0 or more");
-    if (!(salaryDays >= 1)) fail_("Days in a salary month must be 1 or more");
+    if (!eventPaid && !(salaryDays >= 1)) fail_("Days in a salary month must be 1 or more");
     if (isNaN(daysOff) || daysOff < 0 || daysOff > 31) fail_("Days off must be between 0 and 31");
     if (!isHalfStep_(daysOff)) fail_("Days off must be in whole or half days");
-    over = over || {};
+    if (isNaN(eventDays) || eventDays < 0 || eventDays > 31) fail_("Event days must be between 0 and 31");
+    if (!isHalfStep_(eventDays)) fail_("Event days must be in whole or half days");
+    if (!(eventRate >= 0)) fail_("The rate for an event day must be 0 or more");
 
-    const perDay = base / salaryDays;
+    const perDay = eventPaid ? 0 : base / salaryDays;
     const unpaid = Math.max(0, r2_(daysOff - paidHolidays));
     const unused = Math.max(0, r2_(paidHolidays - daysOff));
     const leaveAuto = Math.round(perDay * unpaid);
     const holidayAuto = Math.round(perDay * unused);
+    const eventAuto = r2_(eventDays * eventRate);
 
     const earnings = manual.filter((l) => l.kind === "earning").map((l) => Object.assign({}, l, { auto: 0 }));
     const deductions = manual.filter((l) => l.kind === "deduction").map((l) => Object.assign({}, l, { auto: 0 }));
+    if (eventDays > 0) {
+        if (!(eventRate > 0) && blank(over.event_amount)) fail_("Enter the rate for an event day");
+        earnings.unshift({ kind: "earning", category: EVENT_CATEGORY_, label: EVENT_CATEGORY_, qty: eventDays, amount: amountOr_(over.event_amount, eventAuto), auto: 1 });
+    }
     if (unused > 0)
         earnings.push({ kind: "earning", category: HOLIDAY_CATEGORY_, label: HOLIDAY_CATEGORY_, qty: unused, amount: amountOr_(over.holiday_amount, holidayAuto), auto: 1 });
     if (unpaid > 0)
@@ -81,16 +99,23 @@ function computeSlip_(base, salaryDays, paidHolidays, daysOff, manual, over) {
     return {
         base_salary: base, days_off: daysOff, unpaid_days: unpaid, unused_days: unused,
         per_day: r2_(perDay), leave_auto: leaveAuto, holiday_auto: holidayAuto,
+        pay_type: eventPaid ? "event" : "monthly", event_days: eventDays, event_rate: eventRate, event_auto: eventAuto,
         items: earnings.concat(deductions).map((l, i) => Object.assign(l, { sort: i + 1 })),
         earnings_total: earningsTotal, deductions_total: deductionsTotal,
         net_salary: r2_(base + earningsTotal - deductionsTotal),
     };
 }
 
-/** The lines an admin added, checked. The two lines made from the days off are never taken from the app. */
+// "event" for someone paid only for the event days they work; everyone else, and every row written
+// before there was a choice, is "monthly"
+function payTypeOf_(row) {
+    return row && row.pay_type === "event" ? "event" : "monthly";
+}
+
+/** The lines an admin added, checked. The lines the app writes itself are never taken from the app. */
 function cleanItems_(list) {
     if (!Array.isArray(list)) return [];
-    const reserved = [LEAVE_CATEGORY_.toLowerCase(), HOLIDAY_CATEGORY_.toLowerCase()];
+    const reserved = AUTO_CATEGORIES_;
     const out = [];
     list.forEach((l) => {
         if (!l || l.auto) return;
@@ -127,23 +152,25 @@ function slipBrief_(s) {
         id: s.id, month: s.month, month_label: monthLabel_(s.month), employee_id: s.employee_id, status: s.status,
         base_salary: s.base_salary, earnings_total: s.earnings_total, deductions_total: s.deductions_total,
         net_salary: s.net_salary, days_off: s.days_off, unpaid_days: s.unpaid_days,
+        pay_type: payTypeOf_(s), event_days: s.event_days || 0,
         emailed_at: s.emailed_at, emailed_to: s.emailed_to, pdf_url: s.pdf_url,
     };
 }
 
-/** A slip with its lines, its text, and what the editor needs to work the days-off lines out live. */
+/** A slip with its lines, its text, and what the editor needs to work the app's own lines out live. */
 function slipDetail_(s) {
     const items = itemsOf_(s.id);
     const e = findBy_("Employees", "id", s.employee_id);
     const perDay = s.base_salary / (s.salary_days || 30);
     return {
-        slip: slipOut_(s),
+        slip: Object.assign(slipOut_(s), { pay_type: payTypeOf_(s), event_days: s.event_days || 0, event_rate: s.event_rate || 0 }),
         items: items.map((i) => ({ kind: i.kind, category: i.category, label: i.label, qty: i.qty, amount: i.amount, auto: i.auto ? 1 : 0 })),
         text: slipText_(s, items),
         employee: e ? { id: e.id, name: e.name, email: e.email, phone: e.phone, status: e.status } : null,
         auto: {
             leave_amount: Math.round(perDay * s.unpaid_days),
             holiday_amount: Math.round(perDay * Math.max(0, r2_(s.paid_holidays - s.days_off))),
+            event_amount: r2_((s.event_days || 0) * (s.event_rate || 0)),
         },
     };
 }
@@ -164,13 +191,20 @@ function apiEmployeeSlips_(p, ctx) {
     };
 }
 
+/**
+ * Where a month's payroll has got to.
+ * Someone paid per event day is only due a slip in a month they worked, so until they have one they
+ * are "on call": listed, but not counted as a slip waiting to be started.
+ */
 function monthSummary_(month, rows) {
     const slips = rows.map((r) => r.slip).filter(Boolean);
     const finals = slips.filter((s) => s.status === "final");
+    const due = rows.filter((r) => r.slip || r.employee.pay_type !== "event").length;
     return {
         month, label: monthLabel_(month),
-        employees: rows.length,
-        not_started: rows.length - slips.length,
+        employees: due,
+        on_call: rows.length - due,
+        not_started: due - slips.length,
         drafts: slips.length - finals.length,
         finals: finals.length,
         emailed: finals.filter((s) => s.emailed_at).length,
@@ -188,7 +222,7 @@ function monthRows_(month) {
         .filter((e) => byEmp[e.id] || eligibleFor_(e, month))
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((e) => ({
-            employee: { id: e.id, emp_no: e.emp_no, name: e.name, designation: e.designation, location: e.location, email: e.email, base_salary: e.base_salary, status: e.status },
+            employee: { id: e.id, emp_no: e.emp_no, name: e.name, designation: e.designation, location: e.location, email: e.email, base_salary: e.base_salary, status: e.status, pay_type: payTypeOf_(e), day_rate: e.day_rate || 0 },
             slip: byEmp[e.id] ? slipBrief_(byEmp[e.id]) : null,
         }));
 }
@@ -220,14 +254,18 @@ function assertCanHaveSlip_(e, month) {
 
 function blankSlip_(e, month, ctx, id) {
     const now = nowStr_();
-    const holidays = num_(setting_("paid_holidays"), 1);
+    const type = payTypeOf_(e);
+    // someone paid per event day has no base, so no holiday rule: their slip carries no days off at all
+    const holidays = type === "event" ? 0 : num_(setting_("paid_holidays"), 1);
     const s = {
-        id, month, employee_id: e.id, base_salary: e.base_salary,
+        id, month, employee_id: e.id, base_salary: type === "event" ? 0 : e.base_salary,
         salary_days: num_(setting_("salary_days"), 30), paid_holidays: holidays,
         // a new slip assumes the holiday was taken: nothing is added or taken off until the admin says otherwise
         days_off: holidays, unpaid_days: 0,
         earnings_total: 0, deductions_total: 0, net_salary: 0, status: "draft", notes: "", pdf_url: "",
         emailed_at: "", emailed_to: "", created_by: ctx.user.id, created_at: now, updated_at: now, finalized_at: "",
+        // the slip keeps the pay type it was made with; the rate starts as the employee's and can be changed here
+        pay_type: type, event_days: 0, event_rate: num_(e.day_rate),
     };
     stampEmployee_(s, e);
     return s;
@@ -237,6 +275,8 @@ function applyFigures_(s, c) {
     s.base_salary = c.base_salary;
     s.days_off = c.days_off;
     s.unpaid_days = c.unpaid_days;
+    s.event_days = c.event_days;
+    s.event_rate = c.event_rate;
     s.earnings_total = c.earnings_total;
     s.deductions_total = c.deductions_total;
     s.net_salary = c.net_salary;
@@ -257,8 +297,9 @@ function writeItems_(slipId, items) {
 
 /**
  * Create a draft, or save changes to one.
- * payload: { id } or { employee_id, month }, plus any of base_salary, days_off, items (the added lines),
- * leave_amount / holiday_amount (typed over the worked-out ones; blank = worked out), notes.
+ * payload: { id } or { employee_id, month }, plus any of base_salary, days_off, event_days, event_rate,
+ * items (the added lines), leave_amount / holiday_amount / event_amount (typed over the worked-out
+ * ones; blank = worked out), notes.
  */
 function apiSaveSlip_(p, ctx) {
     return withLock_(() => {
@@ -288,7 +329,12 @@ function apiSaveSlip_(p, ctx) {
             p.base_salary === undefined ? s.base_salary : p.base_salary,
             s.salary_days, s.paid_holidays,
             p.days_off === undefined || p.days_off === "" ? s.days_off : p.days_off,
-            manual, { leave_amount: p.leave_amount, holiday_amount: p.holiday_amount },
+            manual, { leave_amount: p.leave_amount, holiday_amount: p.holiday_amount, event_amount: p.event_amount },
+            {
+                type: payTypeOf_(s),
+                days: p.event_days === undefined || p.event_days === "" ? s.event_days : p.event_days,
+                rate: p.event_rate === undefined || p.event_rate === "" ? s.event_rate : p.event_rate,
+            },
         );
         applyFigures_(s, c);
         if (p.notes !== undefined) s.notes = str_(p.notes).slice(0, 300);
@@ -302,7 +348,11 @@ function apiSaveSlip_(p, ctx) {
     });
 }
 
-/** A draft for everyone on that month's payroll who doesn't have a slip yet, with their recurring lines. */
+/**
+ * A draft for everyone on a monthly salary who doesn't have a slip for that month yet, with their
+ * recurring lines. Those paid per event day are left out: their slip is started by hand, in a month
+ * they worked.
+ */
 function apiPrepareMonth_(p, ctx) {
     const month = str_(p.month);
     if (!validMonth_(month)) fail_("Choose the salary month");
@@ -312,14 +362,14 @@ function apiPrepareMonth_(p, ctx) {
         rows_("Salary_Slips").forEach((s) => {
             if (s.month === month) have[s.employee_id] = true;
         });
-        const todo = rows_("Employees").filter((e) => !have[e.id] && eligibleFor_(e, month));
+        const todo = rows_("Employees").filter((e) => !have[e.id] && payTypeOf_(e) !== "event" && eligibleFor_(e, month));
         let slipId = nextId_("Salary_Slips");
         let itemId = nextId_("Slip_Items");
         const slips = [];
         let items = [];
         todo.forEach((e) => {
             const s = blankSlip_(e, month, ctx, slipId++);
-            const c = computeSlip_(s.base_salary, s.salary_days, s.paid_holidays, s.days_off, cleanRecurring_(e.recurring).map((l) => Object.assign({ qty: 0 }, l)), {});
+            const c = computeSlip_(s.base_salary, s.salary_days, s.paid_holidays, s.days_off, cleanRecurring_(e.recurring).map((l) => Object.assign({ qty: 0 }, l)), {}, { type: s.pay_type, days: 0, rate: s.event_rate });
             applyFigures_(s, c);
             slips.push(s);
             const rows = itemRows_(s.id, c.items, itemId);
@@ -330,7 +380,7 @@ function apiPrepareMonth_(p, ctx) {
         appendRows_("Slip_Items", items);
         if (slips.length) log_(ctx, "PREPARE", "Salary_Slips", month, slips.length + " draft slips for " + monthLabel_(month));
         return {
-            message: slips.length ? slips.length + (slips.length === 1 ? " draft" : " drafts") + " prepared for " + monthLabel_(month) : "Everyone already has a slip for " + monthLabel_(month),
+            message: slips.length ? slips.length + (slips.length === 1 ? " draft" : " drafts") + " prepared for " + monthLabel_(month) : "Everyone on a monthly salary already has a slip for " + monthLabel_(month),
             data: { created: slips.length },
         };
     });
@@ -347,6 +397,8 @@ function apiFinalizeSlip_(p, ctx) {
         if (!s) fail_("Slip not found", "NOT_FOUND");
         if (s.status === "final") fail_("This slip is already final");
         if (s.net_salary < 0) fail_("Deductions are more than the salary. Lower a deduction, or carry part of it to next month.");
+        // no base and nothing earned: an event salesperson's slip for a month they did not work
+        if (!(s.base_salary > 0) && !(s.earnings_total > 0)) fail_("Nothing to pay on this slip. Enter the event days, or delete the draft.");
         const e = findBy_("Employees", "id", s.employee_id);
         if (e) stampEmployee_(s, e);
         const now = nowStr_();

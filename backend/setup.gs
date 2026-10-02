@@ -428,18 +428,19 @@ function seedDemo() {
     // a role from the list in Settings; if the list was changed and no longer has it, the first one there
     const role = (want) => (roles_().indexOf(want) >= 0 ? want : roles_()[0]);
 
-    // [emp_no, name, designation, location, dob, doj, phone, base, recurring]
+    // [emp_no, name, designation, location, dob, doj, phone, base, recurring, event day rate]
+    // Ayesha is paid per event day (no base); Sameer has a base and also works the odd event
     const team = [
         [1, "Imran Shaikh", role("Store Manager"), "Kondhwa", "1988" + soon, year - 5 + "-04-01", "9822012345", 32000, [{ kind: "earning", category: "Allowance", label: "Travel allowance", amount: 1500 }]],
-        [2, "Sameer Khan", role("Salesperson Kiosk"), "Kondhwa", "1996-02-14", year - 3 + "-07-15", "9876543210", 18000, []],
+        [2, "Sameer Khan", role("Salesperson Kiosk"), "Kondhwa", "1996-02-14", year - 3 + "-07-15", "9876543210", 18000, [], 800],
         [3, "Asha Khan", role("Salesperson Kiosk"), "Kalyani Nagar", "1998-11-03", year - 2 + "-01-12", "9765432109", 15000, []],
-        [4, "Ayesha Pathan", role("Salesperson Event"), "Kalyani Nagar", "1999-06-21", year - 1 + "-03-01", "9890011223", 15000, [{ kind: "earning", category: "Allowance", label: "Phone allowance", amount: 300 }]],
+        [4, "Ayesha Pathan", role("Salesperson Event"), "Kalyani Nagar", "1999-06-21", year - 1 + "-03-01", "9890011223", 0, [], 900],
         [5, "Rahul Patil", role("Logistics Executive"), "Kondhwa", "1994-09-30", year - 2 + "-10-05", "9850098500", 14000, []],
         [6, "Zoya Shaikh", role("Salesperson Kiosk"), "Kondhwa", "2000-12-19", year - 1 + "-08-20", "9833445566", 16000, [{ kind: "deduction", category: "Advance", label: "Advance repayment", amount: 1000 }]],
     ];
     team.forEach((t) =>
         apiSaveEmployee_(
-            { emp_no: t[0], name: t[1], designation: t[2], location: t[3], dob: t[4], doj: t[5], phone: t[6], email: t[1].split(" ")[0].toLowerCase() + "@demo.local", base_salary: t[7], recurring: t[8] },
+            { emp_no: t[0], name: t[1], designation: t[2], location: t[3], dob: t[4], doj: t[5], phone: t[6], email: t[1].split(" ")[0].toLowerCase() + "@demo.local", base_salary: t[7], recurring: t[8], pay_type: t[7] ? "monthly" : "event", day_rate: t[9] || 0 },
             ctx,
         ),
     );
@@ -448,13 +449,19 @@ function seedDemo() {
     const before = lastMonth_(last + "-01");
     // days off and extra lines per employee number, to give the slips some variety
     const extras = {
-        2: { days_off: 3, items: [{ kind: "earning", category: "Commission", label: "Commission", amount: 2200 }] },
+        2: { days_off: 3, event_days: 2, items: [{ kind: "earning", category: "Commission", label: "Commission", amount: 2200 }] },
         3: { days_off: 0, items: [{ kind: "earning", category: "Overtime", label: "Overtime (6 hrs)", amount: 600 }] },
         5: { days_off: 2.5, items: [{ kind: "deduction", category: "Penalty", label: "Late marks", amount: 200 }] },
     };
     [before, last].forEach((month) => {
         resetReqCache_();
-        apiPrepareMonth_({ month }, ctx);
+        apiPrepareMonth_({ month }, ctx); // monthly staff only
+        // the event salesperson worked four days in the earlier month and none last month, so has no slip for it
+        if (month === before) {
+            resetReqCache_();
+            const ayesha = rows_("Employees").find((e) => e.emp_no === 4);
+            apiSaveSlip_({ employee_id: ayesha.id, month, event_days: 4, items: [{ kind: "earning", category: "Allowance", label: "Travel to venue", amount: 300 }] }, ctx);
+        }
         resetReqCache_();
         rows_("Salary_Slips")
             .filter((s) => s.month === month)
@@ -464,7 +471,7 @@ function seedDemo() {
                 if (x) {
                     resetReqCache_();
                     const keep = itemsOf_(s.id).filter((i) => !i.auto).map((i) => ({ kind: i.kind, category: i.category, label: i.label, amount: i.amount }));
-                    apiSaveSlip_({ id: s.id, days_off: x.days_off, items: keep.concat(x.items) }, ctx);
+                    apiSaveSlip_({ id: s.id, days_off: x.days_off, event_days: x.event_days || 0, items: keep.concat(x.items) }, ctx);
                 }
                 if (month === before) {
                     resetReqCache_();
@@ -474,6 +481,6 @@ function seedDemo() {
     });
     alert_(
         "Demo data loaded: " + team.length + " employees, " + monthLabel_(before) + " finalized (PDFs are in Salary_Slips), " +
-            monthLabel_(last) + " left as drafts.\n\nThe email addresses are made up — change one to your own before trying Email.",
+            monthLabel_(last) + " left as drafts. One of the team is paid per event day.\n\nThe email addresses are made up — change one to your own before trying Email.",
     );
 }

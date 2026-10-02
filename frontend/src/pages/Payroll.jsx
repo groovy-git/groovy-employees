@@ -77,13 +77,15 @@ export default function Payroll({ month: fromRoute }) {
       { label: "Name", get: (r) => r.employee.name },
       { label: "Role", get: (r) => r.employee.designation },
       { label: "Location", get: (r) => r.employee.location },
+      { label: "Paid", get: (r) => ((r.slip ? r.slip.pay_type : r.employee.pay_type) === "event" ? "Per event day" : "Monthly salary") },
       { label: "Base salary", get: (r) => (r.slip ? r.slip.base_salary : r.employee.base_salary) },
+      { label: "Event days", get: (r) => (r.slip ? r.slip.event_days : "") },
       { label: "Earnings", get: (r) => (r.slip ? r.slip.earnings_total : "") },
       { label: "Deductions", get: (r) => (r.slip ? r.slip.deductions_total : "") },
       { label: "Net salary", get: (r) => (r.slip ? r.slip.net_salary : "") },
       { label: "Days off", get: (r) => (r.slip ? r.slip.days_off : "") },
       { label: "Unpaid days", get: (r) => (r.slip ? r.slip.unpaid_days : "") },
-      { label: "Status", get: (r) => (!r.slip ? "Not started" : r.slip.status === "final" ? "Final" : "Draft") },
+      { label: "Status", get: (r) => (!r.slip ? (r.employee.pay_type === "event" ? "No slip" : "Not started") : r.slip.status === "final" ? "Final" : "Draft") },
       { label: "Emailed to", get: (r) => (r.slip ? r.slip.emailed_to : "") },
     ]);
     downloadText(`payroll-${month}.csv`, text);
@@ -152,13 +154,23 @@ export default function Payroll({ month: fromRoute }) {
                     </div>
                   </div>
                   <div className="right">
-                    <b className="money">{r.slip ? inr(r.slip.net_salary) : <span className="muted">{inr(r.employee.base_salary)}</span>}</b>
-                    <div><SlipBadge slip={r.slip} /></div>
+                    {r.slip ? (
+                      <b className="money">{inr(r.slip.net_salary)}</b>
+                    ) : r.employee.pay_type === "event" ? (
+                      // paid per event day: no base to show, and no slip unless they worked this month
+                      <span className="money small muted">{inr(r.employee.day_rate)} / day</span>
+                    ) : (
+                      <b className="money muted">{inr(r.employee.base_salary)}</b>
+                    )}
+                    <div><SlipBadge slip={r.slip} eventPaid={r.employee.pay_type === "event"} /></div>
                   </div>
                 </button>
               ))}
             </div>
-            <div className="tiny muted center mt">Tap a name to open the slip{s.not_started ? ", or to start it" : ""}.</div>
+            <div className="tiny muted center mt">
+              Tap a name to open the slip{s.not_started || s.on_call ? ", or to start it" : ""}.
+              {s.on_call > 0 && " Those paid per event day get a slip only for a month they worked."}
+            </div>
           </>
         )}
       </div>

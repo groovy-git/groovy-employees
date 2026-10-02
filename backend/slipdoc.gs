@@ -92,13 +92,25 @@ function daysOffNote_(s) {
     return off + " (paid holiday" + (paid === 1 ? "" : "s") + ")";
 }
 
-function lineLabel_(i) {
-    return i.auto && i.qty ? i.label + " (" + daysLabel_(i.qty) + ")" : i.label || i.category;
+/**
+ * A line as the slip prints it. The app's own lines say what they were worked out from:
+ * "Unpaid leave (2 days)", "Event pay (5 days × ₹800)". If the amount of an event line was typed over,
+ * the "× rate" is left off, since the sum would no longer add up.
+ */
+function lineLabel_(i, s, symbol) {
+    if (!i.auto || !i.qty) return i.label || i.category;
+    if (i.category === EVENT_CATEGORY_) {
+        const days = i.qty + (i.qty === 1 ? " day" : " days");
+        const rate = s ? s.event_rate || 0 : 0;
+        return i.label + " (" + days + (rate && r2_(i.qty * rate) === i.amount ? " × " + money_(rate, symbol) : "") + ")";
+    }
+    return i.label + " (" + daysLabel_(i.qty) + ")";
 }
 
 /* ---------- plain text ---------- */
 
-const TEXT_WIDTH_ = 36;
+// wide enough for "Event pay (12 days × ₹1,200)" beside its amount, narrow enough for a phone
+const TEXT_WIDTH_ = 38;
 
 // label on the left, amount on the right; a label too long for the line just pushes the amount along
 function textRow_(label, amount) {
@@ -113,6 +125,8 @@ function slipText_(s, items) {
     const earnings = items.filter((i) => i.kind === "earning");
     const deductions = items.filter((i) => i.kind === "deduction");
     const lines = [];
+    // someone paid per event day has no base and no days off: neither is printed
+    const monthly = payTypeOf_(s) !== "event";
     if (s.status !== "final") lines.push("*** DRAFT - not final ***", "");
     lines.push(String(biz.business_name || "").toUpperCase());
     lines.push("Salary Slip - " + monthLabel_(s.month));
@@ -121,16 +135,17 @@ function slipText_(s, items) {
     lines.push("Role     : " + s.designation);
     if (s.location) lines.push("Location : " + s.location);
     if (s.doj) lines.push("Joined   : " + niceDate_(s.doj));
-    lines.push("Days off : " + daysOffNote_(s));
+    if (monthly) lines.push("Days off : " + daysOffNote_(s));
     lines.push("");
     lines.push("EARNINGS");
-    lines.push(textRow_("Base salary", m(s.base_salary)));
-    earnings.forEach((i) => lines.push(textRow_(lineLabel_(i), m(i.amount))));
-    lines.push(textRow_("Total earnings", m(r2_(s.base_salary + s.earnings_total))));
+    if (monthly) lines.push(textRow_("Base salary", m(s.base_salary)));
+    earnings.forEach((i) => lines.push(textRow_(lineLabel_(i, s, sym), m(i.amount))));
+    if (monthly || earnings.length) lines.push(textRow_("Total earnings", m(r2_(s.base_salary + s.earnings_total))));
+    else lines.push("None");
     lines.push("");
     lines.push("DEDUCTIONS");
     if (deductions.length) {
-        deductions.forEach((i) => lines.push(textRow_(lineLabel_(i), m(i.amount))));
+        deductions.forEach((i) => lines.push(textRow_(lineLabel_(i, s, sym), m(i.amount))));
         lines.push(textRow_("Total deductions", m(s.deductions_total)));
     } else lines.push("None");
     lines.push("");
@@ -220,6 +235,8 @@ function slipPdfHtml_(s, items) {
     const m = (n) => e(money_(n, sym));
     const earnings = items.filter((i) => i.kind === "earning");
     const deductions = items.filter((i) => i.kind === "deduction");
+    const monthly = payTypeOf_(s) !== "event";
+    const eventDays = s.event_days || 0;
     const row = (label, amount, bold) =>
         "<tr><td" + (bold ? ' class="b"' : "") + ">" + e(label) + '</td><td class="n' + (bold ? " b" : "") + '">' + amount + "</td></tr>";
     const table = (title, rows, totalLabel, total) =>
@@ -256,14 +273,14 @@ function slipPdfHtml_(s, items) {
         cell("Employee", "<b>" + e(s.employee_name) + "</b><br>Emp No. " + e(s.emp_no)) +
         cell("Role", e(s.designation) + (s.location ? "<br>" + e(s.location) : "")) +
         cell("Date of joining", e(niceDate_(s.doj))) +
-        cell("Days off", e(daysOffNote_(s))) +
+        (monthly ? cell("Days off", e(daysOffNote_(s))) : cell("Event days", e(eventDays + (eventDays === 1 ? " day" : " days")))) +
         "</tr></table>" +
         '<table style="margin-top:14px"><tr>' +
         '<td style="width:50%;padding-right:7px">' +
-        table("Earnings", [row("Base salary", m(s.base_salary))].concat(earnings.map((i) => row(lineLabel_(i), m(i.amount)))), "Total earnings", r2_(s.base_salary + s.earnings_total)) +
+        table("Earnings", (monthly ? [row("Base salary", m(s.base_salary))] : []).concat(earnings.map((i) => row(lineLabel_(i, s, sym), m(i.amount)))), "Total earnings", r2_(s.base_salary + s.earnings_total)) +
         "</td>" +
         '<td style="width:50%;padding-left:7px">' +
-        table("Deductions", deductions.map((i) => row(lineLabel_(i), m(i.amount))), "Total deductions", s.deductions_total) +
+        table("Deductions", deductions.map((i) => row(lineLabel_(i, s, sym), m(i.amount))), "Total deductions", s.deductions_total) +
         "</td></tr></table>" +
         '<table style="margin-top:14px"><tr>' +
         '<td style="border-top:2px solid #654321;border-bottom:2px solid #654321;padding:8px 7px;font-size:13px;font-weight:bold;color:#654321">NET SALARY</td>' +

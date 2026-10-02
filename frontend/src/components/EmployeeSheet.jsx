@@ -3,10 +3,10 @@ import { useApp } from "../store";
 import { api } from "../lib/api";
 import { runBusy } from "../lib/busy";
 import { istDate } from "../lib/format";
-import { Button, DateField, Field, MoneyInput, Sheet, useConfirm } from "./ui";
+import { Button, DateField, Field, MoneyInput, Seg, Sheet, useConfirm } from "./ui";
 import { LineList } from "./Lines";
 
-export const NEW_EMPLOYEE = { emp_no: "", name: "", designation: "", location: "", dob: "", doj: "", phone: "", email: "", address: "", base_salary: "", recurring: [], notes: "" };
+export const NEW_EMPLOYEE = { emp_no: "", name: "", designation: "", location: "", dob: "", doj: "", phone: "", email: "", address: "", pay_type: "monthly", base_salary: "", day_rate: "", recurring: [], notes: "" };
 
 // values already used, offered as you type so "Kondhwa" is not also "kondhwa" and "Kondwa"
 function Suggest({ id, values }) {
@@ -34,6 +34,9 @@ export default function EmployeeSheet({ e, all = [], onClose, onSaved }) {
   const set = (k) => (ev) => setF({ ...f, [k]: ev.target.value });
   const salaryDays = Number(settings.salary_days) || 30;
   const base = Number(f.base_salary) || 0;
+  // paid a monthly salary, or only for the event days they work (then there is no base to ask for)
+  const eventPaid = f.pay_type === "event";
+  const holidays = Number(settings.paid_holidays) || 0;
   // the roles from Settings. Someone whose role is no longer on that list (or was typed before there
   // was one) keeps it as a choice of their own, so opening and saving them never changes their role.
   const roles = String(settings.roles || "").split("\n").map((r) => r.trim()).filter(Boolean);
@@ -89,9 +92,36 @@ export default function EmployeeSheet({ e, all = [], onClose, onSaved }) {
       </Field>
       <Suggest id="ge-locations" values={all.map((x) => x.location)} />
 
-      <Field label="Monthly base salary" hint={base > 0 ? `One day's salary: ${inr(Math.round((base / salaryDays) * 100) / 100)} (base ÷ ${salaryDays})` : null}>
-        <MoneyInput value={String(f.base_salary ?? "")} onChange={(v) => setF({ ...f, base_salary: v })} />
-      </Field>
+      <div className="field">
+        <label>Paid</label>
+        <Seg
+          value={eventPaid ? "event" : "monthly"}
+          onChange={(v) => setF({ ...f, pay_type: v })}
+          options={[
+            { value: "monthly", label: "Monthly salary" },
+            { value: "event", label: "Per event day" },
+          ]}
+        />
+        <div className="hint">
+          {eventPaid
+            ? "Paid only for the event days they work. No base salary, and no slip in a month without events."
+            : `A fixed salary every month${holidays ? `, with ${holidays} paid holiday${holidays === 1 ? "" : "s"}` : ""}.`}
+        </div>
+      </div>
+      {eventPaid ? (
+        <Field label="Rate per event day" hint="Their slip is the days worked × this rate. It can be changed on each slip.">
+          <MoneyInput value={String(f.day_rate || "")} onChange={(v) => setF({ ...f, day_rate: v })} />
+        </Field>
+      ) : (
+        <>
+          <Field label="Monthly base salary" hint={base > 0 ? `One day's salary: ${inr(Math.round((base / salaryDays) * 100) / 100)} (base ÷ ${salaryDays})` : null}>
+            <MoneyInput value={String(f.base_salary || "")} onChange={(v) => setF({ ...f, base_salary: v })} />
+          </Field>
+          <Field label="Rate per event day (optional)" hint="Only if they also work at events, on top of their salary.">
+            <MoneyInput value={String(f.day_rate || "")} onChange={(v) => setF({ ...f, day_rate: v })} />
+          </Field>
+        </>
+      )}
 
       <div className="section-label" style={{ marginLeft: 0 }}>Contact</div>
       <div className="grid-2">

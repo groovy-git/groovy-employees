@@ -12,6 +12,16 @@ import { Avatar, Button, Empty, Sheet, SkeletonList } from "../components/ui";
 import EmployeeSheet from "../components/EmployeeSheet";
 import SlipBadge from "../components/SlipBadge";
 
+const days = (n) => `${n} ${n === 1 ? "day" : "days"}`;
+
+// the one thing worth knowing about a past slip at a glance: event days, unpaid leave, or days off
+function slipNote(s) {
+  const event = s.event_days > 0 ? `${days(s.event_days)} at events` : "";
+  if (s.pay_type === "event") return event || "No event days";
+  const off = s.unpaid_days > 0 ? `${days(s.unpaid_days)} unpaid` : `${days(s.days_off)} off`;
+  return [off, event].filter(Boolean).join(" · ");
+}
+
 export default function EmployeeDetail({ id }) {
   const { toast, inr, settings } = useApp();
   const [edit, setEdit] = useState(false);
@@ -103,14 +113,37 @@ export default function EmployeeDetail({ id }) {
         </div>
 
         <div className="card">
-          <div className="card-title">
-            <h3>Salary</h3>
-            <span className="small muted">{inr(Math.round((e.base_salary / salaryDays) * 100) / 100)} a day</span>
-          </div>
-          <div className="kv">
-            <span className="k">Base salary, per month</span>
-            <b className="money">{inr(e.base_salary)}</b>
-          </div>
+          {e.pay_type === "event" ? (
+            // no base: paid for the event days worked, and only in a month there were some
+            <>
+              <div className="card-title">
+                <h3>Pay</h3>
+                <span className="badge gold">Per event day</span>
+              </div>
+              <div className="kv">
+                <span className="k">Rate per event day</span>
+                <b className="money">{inr(e.day_rate)}</b>
+              </div>
+              <div className="small muted">No base salary. A slip is made only for a month they worked.</div>
+            </>
+          ) : (
+            <>
+              <div className="card-title">
+                <h3>Salary</h3>
+                <span className="small muted">{inr(Math.round((e.base_salary / salaryDays) * 100) / 100)} a day</span>
+              </div>
+              <div className="kv">
+                <span className="k">Base salary, per month</span>
+                <b className="money">{inr(e.base_salary)}</b>
+              </div>
+              {e.day_rate > 0 && (
+                <div className="kv small">
+                  <span className="k">Event day, when they work one</span>
+                  <span className="money">{inr(e.day_rate)}</span>
+                </div>
+              )}
+            </>
+          )}
           {e.recurring.map((l, i) => (
             <div key={i} className="kv small">
               <span className="k">{l.label} · every month</span>
@@ -134,7 +167,7 @@ export default function EmployeeDetail({ id }) {
                 <div className="avatar"><ReceiptText size={20} /></div>
                 <div className="grow">
                   <div className="title">{s.month_label}</div>
-                  <div className="sub">{s.unpaid_days > 0 ? `${s.unpaid_days} unpaid ${s.unpaid_days === 1 ? "day" : "days"}` : `${s.days_off} ${s.days_off === 1 ? "day" : "days"} off`}</div>
+                  <div className="sub">{slipNote(s)}</div>
                 </div>
                 <div className="right">
                   <b className="money">{inr(s.net_salary)}</b>

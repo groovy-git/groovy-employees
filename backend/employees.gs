@@ -22,7 +22,7 @@ function isHalfStep_(n) {
  */
 function cleanRecurring_(list) {
     if (!Array.isArray(list)) return [];
-    const reserved = [LEAVE_CATEGORY_.toLowerCase(), HOLIDAY_CATEGORY_.toLowerCase()];
+    const reserved = AUTO_CATEGORIES_;
     return list
         .map((l) => {
             const kind = KINDS_.indexOf(l && l.kind) >= 0 ? l.kind : "";
@@ -46,11 +46,18 @@ function roleFor_(wanted, existing) {
     return hit;
 }
 
+// how someone is paid, in a few words, for the activity log
+function payLine_(e) {
+    if (payTypeOf_(e) === "event") return "per event day " + (e.day_rate || 0);
+    return "base salary " + e.base_salary + (e.day_rate ? ", event day " + e.day_rate : "");
+}
+
 function employeeOut_(e, slips) {
     return {
         id: e.id, emp_no: e.emp_no, name: e.name, designation: e.designation, location: e.location,
         dob: e.dob, doj: e.doj, phone: e.phone, email: e.email, address: e.address,
-        base_salary: e.base_salary, recurring: e.recurring || [], status: e.status || "active", dol: e.dol,
+        base_salary: e.base_salary, pay_type: payTypeOf_(e), day_rate: e.day_rate || 0,
+        recurring: e.recurring || [], status: e.status || "active", dol: e.dol,
         notes: e.notes, created_at: e.created_at, updated_at: e.updated_at,
         slips: slips || 0,
     };
@@ -78,7 +85,10 @@ function apiSaveEmployee_(p, ctx) {
     const doj = str_(p.doj);
     const dob = str_(p.dob);
     const email = str_(p.email).toLowerCase();
-    const base = r2_(num_(p.base_salary));
+    // paid a monthly base, or only for the event days they work (then there is no base at all)
+    const payType = p.pay_type === "event" ? "event" : "monthly";
+    const base = payType === "event" ? 0 : r2_(num_(p.base_salary));
+    const dayRate = r2_(num_(p.day_rate));
     if (!(empNo > 0) || Math.floor(empNo) !== empNo) fail_("Emp No. must be a whole number, 1 or more");
     if (!name) fail_("Name is required");
     if (!designation) fail_("Choose a role");
@@ -89,7 +99,9 @@ function apiSaveEmployee_(p, ctx) {
         if (dob >= doj) fail_("Date of birth must be before the date of joining");
     }
     if (email && !EMAIL_RE_.test(email)) fail_("Email is not valid");
-    if (!(base > 0)) fail_("Enter the monthly base salary");
+    if (payType === "monthly" && !(base > 0)) fail_("Enter the monthly base salary");
+    if (dayRate < 0) fail_("The rate for an event day must be 0 or more");
+    if (payType === "event" && !(dayRate > 0)) fail_("Enter the rate for an event day");
 
     return withLock_(() => {
         const clash = rows_("Employees").find((e) => e.emp_no === empNo && e.id !== Number(p.id || 0));
@@ -100,21 +112,22 @@ function apiSaveEmployee_(p, ctx) {
         const fields = {
             emp_no: empNo, name, designation: roleFor_(designation, existing), location: str_(p.location), dob, doj,
             phone: str_(p.phone).slice(0, 20), email, address: str_(p.address), base_salary: base,
+            pay_type: payType, day_rate: dayRate,
             recurring: cleanRecurring_(p.recurring), notes: str_(p.notes), updated_at: now,
         };
         if (p.id) {
             const e = existing;
             if (e.status === "left" && e.dol && e.dol < doj) fail_("Date of joining is after the date of leaving (" + e.dol + ")");
-            const was = e.base_salary;
+            const was = payLine_(e);
             Object.assign(e, fields);
             updateRows_("Employees", [e]);
-            // a salary change is the one edit worth being able to trace later
-            log_(ctx, "UPDATE", "Employees", e.id, name + (was !== base ? " — base salary " + was + " → " + base : ""));
+            // a change in pay is the one edit worth being able to trace later
+            log_(ctx, "UPDATE", "Employees", e.id, name + (was !== payLine_(e) ? " — " + was + " → " + payLine_(e) : ""));
             return { message: "Employee saved", data: employeeOut_(e, slipCounts_()[e.id]) };
         }
         const e = Object.assign({ id: nextId_("Employees"), status: "active", dol: "", created_at: now }, fields);
         appendRows_("Employees", [e]);
-        log_(ctx, "CREATE", "Employees", e.id, name + " (Emp No. " + empNo + ") — base salary " + base);
+        log_(ctx, "CREATE", "Employees", e.id, name + " (Emp No. " + empNo + ") — " + payLine_(e));
         return { message: "Employee added", data: employeeOut_(e, 0) };
     });
 }

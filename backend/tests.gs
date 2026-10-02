@@ -65,6 +65,39 @@ function runTests() {
     throws("line without an amount rejected", () => cleanItems_([{ kind: "earning", category: "Bonus", label: "Bonus", amount: 0 }]));
     eq("days-off lines are never taken from the app", cleanItems_([{ kind: "deduction", category: "Unpaid leave", label: "x", amount: 50 }]).length, 0);
 
+    // event pay: days worked × a daily rate, for anyone
+    c = computeSlip_(0, 30, 1, 1, [], {}, { type: "event", days: 5, rate: 800 });
+    eq("event: 5 days × 800", [line(c, "Event pay").amount, line(c, "Event pay").qty, c.net_salary], [4000, 5, 4000]);
+    eq("event: no base, whatever was sent", computeSlip_(15000, 30, 1, 1, [], {}, { type: "event", days: 5, rate: 800 }).base_salary, 0);
+    eq("event: no days off, so no holiday or leave lines", [c.days_off, c.unpaid_days, c.unused_days, c.items.length], [0, 0, 0, 1]);
+    c = computeSlip_(0, 30, 1, 0, [], {}, { type: "event", days: 5, rate: 800 });
+    eq("event: a holiday 'not taken' pays nothing extra", [line(c, "Holiday not taken"), c.net_salary], [null, 4000]);
+    c = computeSlip_(0, 30, 1, 1, [], {}, { type: "event", days: 2.5, rate: 900 });
+    eq("event: half days", line(c, "Event pay").amount, 2250);
+    c = computeSlip_(0, 30, 1, 1, [], {}, { type: "event", days: 0, rate: 800 });
+    eq("event: no days, nothing to pay", [c.items.length, c.net_salary], [0, 0]);
+    c = computeSlip_(0, 30, 1, 1, [], { event_amount: 3500 }, { type: "event", days: 5, rate: 800 });
+    eq("event: amount typed over", [line(c, "Event pay").amount, c.event_auto, c.net_salary], [3500, 4000, 3500]);
+    c = computeSlip_(0, 30, 1, 1, [
+        { kind: "earning", category: "Allowance", label: "Travel", qty: 0, amount: 300 },
+        { kind: "deduction", category: "Advance", label: "Advance", qty: 0, amount: 1000 },
+    ], {}, { type: "event", days: 5, rate: 800 });
+    eq("event: other lines still count", [c.earnings_total, c.deductions_total, c.net_salary], [4300, 1000, 3300]);
+    eq("event pay is the first earning", c.items[0].category, "Event pay");
+    // someone on a base who also worked two event days, and took three days off
+    c = computeSlip_(18000, 30, 1, 3, [], {}, { type: "monthly", days: 2, rate: 800 });
+    eq("monthly + event days", [c.base_salary, line(c, "Event pay").amount, line(c, "Unpaid leave").amount, c.net_salary], [18000, 1600, 1200, 18400]);
+    c = computeSlip_(15000, 30, 1, 3, [], {});
+    eq("no event argument: as before", [c.event_days, c.pay_type, c.net_salary], [0, "monthly", 14000]);
+    throws("event days above 31 rejected", () => computeSlip_(0, 30, 1, 1, [], {}, { type: "event", days: 40, rate: 800 }));
+    throws("quarter event days rejected", () => computeSlip_(0, 30, 1, 1, [], {}, { type: "event", days: 1.25, rate: 800 }));
+    throws("event days without a rate rejected", () => computeSlip_(0, 30, 1, 1, [], {}, { type: "event", days: 3, rate: 0 }));
+    eq("event pay is never taken from the app", cleanItems_([{ kind: "earning", category: "Event pay", label: "x", amount: 99999 }]).length, 0);
+    eq("event line label", lineLabel_({ auto: 1, category: "Event pay", label: "Event pay", qty: 5, amount: 4000 }, { event_rate: 800 }, "₹"), "Event pay (5 days × ₹800)");
+    eq("event line label, one day", lineLabel_({ auto: 1, category: "Event pay", label: "Event pay", qty: 1, amount: 800 }, { event_rate: 800 }, "₹"), "Event pay (1 day × ₹800)");
+    eq("event line label, amount typed over", lineLabel_({ auto: 1, category: "Event pay", label: "Event pay", qty: 5, amount: 3500 }, { event_rate: 800 }, "₹"), "Event pay (5 days)");
+    eq("pay type of an old row", [payTypeOf_({ pay_type: "" }), payTypeOf_({}), payTypeOf_({ pay_type: "event" })], ["monthly", "monthly", "event"]);
+
     // money and words
     eq("money", money_(1234567, "₹"), "₹12,34,567");
     eq("money with paise", money_(1250.5, "₹"), "₹1,250.50");

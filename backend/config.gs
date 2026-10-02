@@ -61,6 +61,10 @@ const SCHEMA = {
         notes: "s",
         created_at: "d",
         updated_at: "d",
+        // how they are paid: "monthly" (a base salary; blank means this too) or "event" (only for the
+        // event days they work, no base). New columns go at the end so Setup can add them to a live sheet.
+        pay_type: "s",
+        day_rate: "n", // what one event day pays; the starting rate on their slips
     },
     Salary_Slips: {
         id: "n",
@@ -89,6 +93,9 @@ const SCHEMA = {
         created_at: "d",
         updated_at: "d",
         finalized_at: "d",
+        pay_type: "s", // as the employee was paid when the slip was made: monthly | event
+        event_days: "n", // event days worked that month (monthly staff can have these too)
+        event_rate: "n", // what one of those days paid
     },
     Slip_Items: {
         id: "n",
@@ -143,6 +150,8 @@ const DEFAULT_SETTINGS = {
 };
 
 const KINDS_ = ["earning", "deduction"];
-// the two lines the app writes itself, from the days off
+// the lines the app writes itself: two from the days off, one from the event days worked
 const LEAVE_CATEGORY_ = "Unpaid leave";
 const HOLIDAY_CATEGORY_ = "Holiday not taken";
+const EVENT_CATEGORY_ = "Event pay";
+const AUTO_CATEGORIES_ = [LEAVE_CATEGORY_, HOLIDAY_CATEGORY_, EVENT_CATEGORY_].map((c) => c.toLowerCase());

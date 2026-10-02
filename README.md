@@ -11,7 +11,7 @@ Admin's phone or laptop (installed app)  ──►  Google Apps Script (backend)
 
 - **All data lives in your Google Sheet.** GitHub only hosts the app's screens, not the data.
 - **Only admins log in.** Employees are records, not users. Each one gets their slip by email, and you can also share it by WhatsApp or print it.
-- **What it keeps about an employee:** number, name, role, location, date of birth, date of joining, mobile, email, address, monthly base salary.
+- **What it keeps about an employee:** number, name, role, location, date of birth, date of joining, mobile, email, address, and how they are paid (a monthly base salary, or a rate per event day).
 - **What it never keeps:** bank account details, PAN, Aadhaar or any other ID number. There is nowhere to type them.
 
 ## How a salary is worked out
@@ -27,8 +27,18 @@ Net salary = Base salary + Earnings − Deductions
     - 0 days off: the holiday not taken is paid as an extra day, ₹500 on ₹15,000.
     - Half days work too (1.5 days off is half a day unpaid).
 - **Earnings** you add: overtime, commission, allowance, bonus. **Deductions** you add: advance, penalty.
+- **Event days.** Anyone can be paid for days worked at events: enter the days on the slip and the app adds `Event pay (5 days × ₹800)`. The rate starts as the one on their profile and can be changed on the slip.
 - The app fills in the unpaid-leave and holiday amounts for you. You can type over either one.
 - The 30 and the 1 are settings (**More → Settings → Salary rules**). Changing them affects slips prepared afterwards; existing slips keep the rules they were made with.
+
+### People paid per event day
+
+Some salespeople work only at events and have no monthly salary. On their profile choose **Paid: Per event day** and give the rate for a day.
+
+- Their slip has no base salary and no days off, so the holiday rule doesn't apply. It is the event days × the rate, plus any other earnings and deductions you add.
+- They get a slip only for a month they worked. **Prepare drafts** skips them and Home doesn't count them as waiting; in Payroll they show **No slip** until you tap their name to start one.
+- A slip with nothing to pay can't be finalized. Enter the event days, or delete the draft.
+- If you change how someone is paid, a draft that is already open keeps the way it was made. Delete it and start it again.
 
 ---
 
@@ -64,7 +74,7 @@ Net salary = Base salary + Earnings − Deductions
     - Setup creates the tabs, and the **Groovy Employees** folder beside **Groovy Kiosk** in Drive, and moves this sheet into it.
     - It shows an **admin email and password**. The email is the Google account you're signed in with. Write these down, and change the password after your first login (**More → My account**).
     - It also tells you **who else can open the folder**. Read that line: see "Keep the folder private" below.
-6. Optional: click **Groovy Employees → Run self-tests**. You should see "All 50 tests passed".
+6. Optional: click **Groovy Employees → Run self-tests**. You should see "All 69 tests passed".
 7. Deploy the backend as a web app:
     - In Apps Script, click **Deploy → New deployment**.
     - Type: **Web app**.
@@ -115,6 +125,7 @@ It works the same in a laptop browser.
 3. **Employees → Add employee** for each person:
     - **Emp No.** is the number that person has as `id` in the Groovy Kiosk sheet. You type it; the app only checks that no two employees share one. For someone who isn't in Kiosk, use any unused number.
     - **Role** is chosen from the list in Settings → Roles.
+    - **Paid** is either a monthly salary (enter the base) or per event day (enter the rate for a day; there is no base). Someone on a monthly salary can also have an event day rate, for when they work an event on top.
     - **Email** is where their slip is sent. Without one the slip is still made and filed, just not emailed.
     - **Added / Deducted every month**: fixed lines such as a travel allowance. They are filled into each new slip.
 
@@ -122,9 +133,10 @@ It works the same in a laptop browser.
 
 Usually on the 1st, for the month just ended. **Home** shows that month and what is left to do.
 
-1. **Payroll**. It opens on last month. Tap **Prepare drafts** to make a draft slip for everyone.
+1. **Payroll**. It opens on last month. Tap **Prepare drafts** to make a draft slip for everyone on a monthly salary. For someone paid per event day who worked that month, tap their name to start their slip.
 2. Tap each name:
     - Set **Days off taken**. The line under it says what that comes to.
+    - Set **Event days worked** if they worked at events that month.
     - **Add earning** / **Add deduction** for anything extra that month.
     - **Preview the slip** if you want to read it first.
     - Tap **Finalize**. The slip is locked, its PDF is filed in Drive, and it is emailed if the box is ticked.
@@ -149,17 +161,17 @@ Joined   : 12 Jan 2024
 Days off : 3 (1 paid holiday, 2 unpaid)
 
 EARNINGS
-Base salary                  ₹15,000
-Overtime (6 hrs)              ₹1,200
-Commission                      ₹850
-Total earnings               ₹17,050
+Base salary                    ₹15,000
+Overtime (6 hrs)                ₹1,200
+Commission                        ₹850
+Total earnings                 ₹17,050
 
 DEDUCTIONS
-Unpaid leave (2 days)         ₹1,000
-Advance                       ₹2,000
-Total deductions              ₹3,000
+Unpaid leave (2 days)           ₹1,000
+Advance                         ₹2,000
+Total deductions                ₹3,000
 
-NET SALARY                   ₹14,050
+NET SALARY                     ₹14,050
 Rupees Fourteen Thousand Fifty only
 
 Generated on 1 Oct 2026.
@@ -240,7 +252,7 @@ Groovy Employees sits beside Groovy Kiosk, so it takes on whatever sharing the f
 
 ```
 backend/   Apps Script (.gs): api.gs (doPost + action table), auth, employees, slips (the maths), slipdoc (text, PDF, email), setup
-  dev/     mock-gas.js (in-memory Apps Script, Sheets and Drive), e2e.js (278 checks), server.js (local API)
+  dev/     mock-gas.js (in-memory Apps Script, Sheets and Drive), e2e.js (370 checks), server.js (local API)
 frontend/  Vite + React PWA: src/pages (screens), src/components, src/lib (api, slip figures, printing)
 ```
 
@@ -259,6 +271,7 @@ Rules the backend enforces:
 
 - A slip's totals are always worked out on the server from the base, the days off and the lines. Totals sent by the app are ignored.
 - One slip per employee per month. None for a month that hasn't started, before joining, or after leaving.
+- Someone paid per event day has no base on their slip whatever the app sends, and none of the lines the app writes itself (unpaid leave, holiday not taken, event pay) can be sent in as an ordinary line.
 - A final slip is read-only until it is reopened, and carries the employee's name, number and role as they were when it was finalized.
 - Each request carries a `req_id`, so a retry on a weak network can never make a second slip or send a second email.
 - All dates use IST.

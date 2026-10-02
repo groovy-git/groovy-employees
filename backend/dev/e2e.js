@@ -194,7 +194,7 @@ ok(call("setEmployeeStatus", { id: gone.id, status: "left", dol: "2026-03-20" },
 
 // a salary change is logged with both figures
 ok(call("saveEmployee", Object.assign({}, noMail, { base_salary: 17000 }), T), "raise Rahul");
-check("salary change logged", ok(call("listLogs", { q: "rahul" }, T), "logs").some((l) => /16000 → 17000/.test(l.details)));
+check("salary change logged", ok(call("listLogs", { q: "rahul" }, T), "logs").some((l) => /base salary 16000 → base salary 17000/.test(l.details)));
 ok(call("saveEmployee", Object.assign({}, noMail, { base_salary: 16000 }), T), "put Rahul back");
 
 const list = ok(call("listEmployees", {}, T), "list employees");
@@ -241,17 +241,17 @@ const want = [
     "Days off : 3 (1 paid holiday, 2 unpaid)",
     "",
     "EARNINGS",
-    "Base salary                  ₹15,000",
-    "Overtime (6 hrs)              ₹1,200",
-    "Commission                      ₹850",
-    "Total earnings               ₹17,050",
+    "Base salary                    ₹15,000",
+    "Overtime (6 hrs)                ₹1,200",
+    "Commission                        ₹850",
+    "Total earnings                 ₹17,050",
     "",
     "DEDUCTIONS",
-    "Unpaid leave (2 days)         ₹1,000",
-    "Advance                       ₹2,000",
-    "Total deductions              ₹3,000",
+    "Unpaid leave (2 days)           ₹1,000",
+    "Advance                         ₹2,000",
+    "Total deductions                ₹3,000",
     "",
-    "NET SALARY                   ₹14,050",
+    "NET SALARY                     ₹14,050",
     "Rupees Fourteen Thousand Fifty only",
     "",
 ];
@@ -528,13 +528,172 @@ run(`SpreadsheetApp.getUi = () => { throw new Error("no UI in tests"); }`);
     check("demo data loaded", /Demo data loaded: 6 employees/.test(said), said);
     const t = demo.call("login", { email: "owner@groovy.test", password: p }).data.token;
     const dash2 = demo.call("dashboard", {}, t).data;
-    check("demo: six active, last month all drafts", dash2.active === 6 && dash2.payroll.drafts === 6 && dash2.payroll.finals === 0, dash2);
+    check("demo: six active; last month five drafts and the event salesperson on call", dash2.active === 6 && dash2.payroll.drafts === 5 && dash2.payroll.employees === 5 && dash2.payroll.on_call === 1 && dash2.payroll.not_started === 0 && dash2.payroll.finals === 0, dash2);
+    check("demo: base total leaves out the one paid per event day", dash2.base_total === 32000 + 18000 + 15000 + 14000 + 16000, dash2.base_total);
+    const lastRows = demo.call("listMonth", { month: dash2.month }, t).data.rows;
+    check("demo: Ayesha has no slip last month", lastRows.find((x) => x.employee.name === "Ayesha Pathan").slip === null && lastRows.find((x) => x.employee.name === "Ayesha Pathan").employee.pay_type === "event");
+    const demoSameer = demo.call("getSlip", { id: lastRows.find((x) => x.employee.name === "Sameer Khan").slip.id }, t).data;
+    check("demo: Sameer has a base, unpaid leave and two event days", demoSameer.slip.base_salary === 18000 && demoSameer.items.find((i) => i.category === "Event pay").amount === 1600 && demoSameer.items.find((i) => i.category === "Unpaid leave").amount === 1200, demoSameer.items);
     check("demo: a birthday is coming up", dash2.upcoming.some((u) => u.type === "birthday" && u.days === 9), dash2.upcoming);
     const prev = demo.ctx.lastMonth_(dash2.month + "-01");
     const m = demo.call("listMonth", { month: prev }, t).data;
     check("demo: the month before is final, with PDFs, nothing emailed", m.summary.finals === 6 && m.rows.every((x) => x.slip.pdf_url) && demo.mails.length === 0, m.summary);
+    const ay = m.rows.find((x) => x.employee.name === "Ayesha Pathan").slip;
+    check("demo: Ayesha's slip that month is four event days plus travel", ay.pay_type === "event" && ay.event_days === 4 && ay.base_salary === 0 && ay.net_salary === 4 * 900 + 300, ay);
     demo.ctx.seedDemo();
     check("demo data refuses to load twice", /already exist/.test(demo.alerts.pop()));
+}
+
+/* ================= paid per event day: no base salary ================= */
+{
+    const ev = createEnv();
+    ev.drive.make("folder", "Groovy Kiosk", ev.drive.make("folder", "GBG", ev.drive.root));
+    ev.ctx.setupSheets();
+    const t = ev.call("login", { email: "owner@groovy.test", password: /Password: (\S+)/.exec(ev.alerts.pop())[1] }).data.token;
+    const call2 = (action, payload) => ev.call(action, payload, t);
+    const row = (label, amount) => label + " ".repeat(38 - label.length - amount.length) + amount; // a line of the slip
+    const person = (o) => Object.assign({ designation: "Salesperson Event", doj: "2025-03-01" }, o);
+    const cat = (d, c) => d.items.find((i) => i.category === c);
+
+    // ---- the employee ----
+    refused(call2("saveEmployee", person({ emp_no: 4, name: "Ayesha Pathan", pay_type: "event" })), "per event day needs a rate", /rate for an event day/);
+    refused(call2("saveEmployee", person({ emp_no: 4, name: "Ayesha Pathan", pay_type: "event", day_rate: -5 })), "a negative rate is refused", /0 or more/);
+    const ayesha = ok(call2("saveEmployee", person({ emp_no: 4, name: "Ayesha Pathan", pay_type: "event", day_rate: 800, base_salary: 15000, email: "ayesha@example.com" })), "add someone paid per event day");
+    check("no base is kept for them, whatever was sent", ayesha.pay_type === "event" && ayesha.base_salary === 0 && ayesha.day_rate === 800, ayesha);
+    refused(call2("saveEmployee", person({ emp_no: 2, name: "Sameer Khan", designation: "Salesperson Kiosk", pay_type: "monthly" })), "a monthly salary still needs a base", /monthly base salary/);
+    refused(call2("saveEmployee", person({ emp_no: 2, name: "Sameer Khan", designation: "Salesperson Kiosk" })), "and so does an app that sends no pay type", /monthly base salary/);
+    const sameer = ok(call2("saveEmployee", person({ emp_no: 2, name: "Sameer Khan", designation: "Salesperson Kiosk", base_salary: 18000, day_rate: 700 })), "monthly, with a rate for the odd event");
+    check("no pay type sent means monthly", sameer.pay_type === "monthly" && sameer.base_salary === 18000 && sameer.day_rate === 700, sameer);
+    const logged = ok(call2("listLogs", {}), "log");
+    check("the log says how each is paid", logged.some((l) => /Ayesha Pathan.*per event day 800/.test(l.details)) && logged.some((l) => /Sameer Khan.*base salary 18000, event day 700/.test(l.details)), logged.map((l) => l.details));
+    check("base total counts the monthly salary only", ok(call2("dashboard", {}), "dashboard").base_total === 18000);
+
+    // ---- the month: only those on a monthly salary are due a slip ----
+    let month = ok(call2("listMonth", { month: "2026-09" }), "September");
+    check("both are listed", month.rows.map((x) => x.employee.name + ":" + x.employee.pay_type).join() === "Ayesha Pathan:event,Sameer Khan:monthly", month.rows);
+    check("one slip due, one person on call", month.summary.employees === 1 && month.summary.on_call === 1 && month.summary.not_started === 1, month.summary);
+    check("prepare makes the monthly slip only", ok(call2("prepareMonth", { month: "2026-09" }), "prepare").created === 1);
+    const again = call2("prepareMonth", { month: "2026-09" });
+    check("prepare again: nothing, and it says who it covers", again.data.created === 0 && /Everyone on a monthly salary already has a slip/.test(again.message), again.message);
+    month = ok(call2("listMonth", { month: "2026-09" }), "September");
+    check("still no slip for the event salesperson, and nothing waiting", month.rows[0].slip === null && month.summary.not_started === 0 && month.summary.drafts === 1, month.summary);
+
+    // ---- their slip, started by hand ----
+    let d = ok(call2("saveSlip", { employee_id: ayesha.id, month: "2026-09" }), "start Ayesha's slip");
+    const id = d.slip.id;
+    check("an event slip starts empty: no base, no days off", d.slip.pay_type === "event" && d.slip.base_salary === 0 && d.slip.days_off === 0 && d.slip.paid_holidays === 0 && d.slip.event_days === 0 && d.slip.event_rate === 800 && d.items.length === 0 && d.slip.net_salary === 0, d.slip);
+    check("its text has no base salary or days off", !/Base salary/.test(d.text) && !/Days off/.test(d.text) && /EARNINGS\nNone\n/.test(d.text), d.text);
+    refused(call2("finalizeSlip", { id }), "nothing to pay cannot be finalized", /Nothing to pay/);
+    month = ok(call2("listMonth", { month: "2026-09" }), "September");
+    check("now two slips are in hand", month.summary.employees === 2 && month.summary.on_call === 0 && month.summary.drafts === 2, month.summary);
+
+    d = ok(call2("saveSlip", { id, event_days: 5 }), "five event days");
+    check("5 days × 800", cat(d, "Event pay").amount === 4000 && cat(d, "Event pay").qty === 5 && cat(d, "Event pay").auto === 1 && d.slip.event_days === 5 && d.slip.net_salary === 4000 && d.auto.event_amount === 4000, d);
+    check("the slip says what it was worked out from", d.text.split("\n").includes(row("Event pay (5 days × ₹800)", "₹4,000")) && d.text.split("\n").includes(row("NET SALARY", "₹4,000")), d.text);
+    d = ok(call2("saveSlip", { id, base_salary: 9999, days_off: 6, leave_amount: 500, holiday_amount: 500 }), "a base and days off sent for an event slip");
+    check("they are ignored", d.slip.base_salary === 0 && d.slip.days_off === 0 && d.items.length === 1 && d.slip.net_salary === 4000, d);
+    d = ok(call2("saveSlip", { id, event_days: 2.5 }), "half days");
+    check("2.5 days × 800", cat(d, "Event pay").amount === 2000 && /Event pay \(2\.5 days × ₹800\)/.test(d.text), d.text);
+    refused(call2("saveSlip", { id, event_days: 40 }), "40 event days refused", /between 0 and 31/);
+    refused(call2("saveSlip", { id, event_days: 1.25 }), "quarter event days refused", /whole or half/);
+    refused(call2("saveSlip", { id, items: [{ kind: "earning", category: "Bonus", label: "Bonus", amount: -1 }] }), "a bad line is still refused");
+    // a different rate for this month only
+    d = ok(call2("saveSlip", { id, event_days: 5, event_rate: 1000 }), "a higher rate this month");
+    check("the slip's own rate is used", cat(d, "Event pay").amount === 5000 && d.slip.event_rate === 1000 && /5 days × ₹1,000/.test(d.text), d);
+    check("the employee's usual rate is untouched", ok(call2("listEmployees", {}), "list").find((e) => e.id === ayesha.id).day_rate === 800);
+    // an amount typed over the worked-out one
+    d = ok(call2("saveSlip", { id, event_amount: 4500 }), "event amount typed over");
+    check("typed amount kept, and the label stops claiming a sum", cat(d, "Event pay").amount === 4500 && d.auto.event_amount === 5000 && d.text.split("\n").includes(row("Event pay (5 days)", "₹4,500")), d.text);
+    d = ok(call2("saveSlip", { id, event_rate: 800, event_amount: "" }), "back to the usual rate, worked out");
+    // other earnings and deductions work as on any slip
+    d = ok(call2("saveSlip", { id, items: [{ kind: "earning", category: "Allowance", label: "Travel", amount: 300 }, { kind: "deduction", category: "Advance", label: "Advance", amount: 1000 }, { kind: "earning", category: "Event pay", label: "sneaky", amount: 99999 }] }), "travel and an advance");
+    check("totals", d.slip.earnings_total === 4300 && d.slip.deductions_total === 1000 && d.slip.net_salary === 3300 && d.items.map((i) => i.label).join() === "Event pay,Travel,Advance", d);
+    const want = [
+        "Employee : Ayesha Pathan (Emp No. 4)",
+        "Role     : Salesperson Event",
+        "Joined   : 1 Mar 2025",
+        "",
+        "EARNINGS",
+        row("Event pay (5 days × ₹800)", "₹4,000"),
+        row("Travel", "₹300"),
+        row("Total earnings", "₹4,300"),
+        "",
+        "DEDUCTIONS",
+        row("Advance", "₹1,000"),
+        row("Total deductions", "₹1,000"),
+        "",
+        row("NET SALARY", "₹3,300"),
+        "Rupees Three Thousand Three Hundred only",
+    ].join("\n");
+    check("the whole event slip", d.text.indexOf(want) > 0, d.text);
+
+    const fin = call2("finalizeSlip", { id, email: true });
+    d = ok(fin, "finalize the event slip");
+    const pdf = ev.drive.items.get(/\/d\/([^/]+)/.exec(d.slip.pdf_url)[1]);
+    check("filed like any slip", pathOf(pdf) === "My Drive/GBG/Groovy Employees/Salary_Slips/FY 2026-27/09/4-Ayesha-2026-09.pdf" && /Emailed to ayesha@example\.com/.test(fin.message), pathOf(pdf));
+    check("PDF: event days, the event line, no base and no days off", ["Event days", "5 days", "Event pay (5 days × ₹800)", "₹3,300", "Travel"].every((x) => pdf.html.indexOf(x) >= 0) && !/Base salary/.test(pdf.html) && !/Days off/i.test(pdf.html), pdf.html);
+    check("the email is the same slip", ev.mails[ev.mails.length - 1].body.indexOf(want) > 0);
+
+    // ---- someone on a monthly salary who also worked two event days ----
+    const sSlip = month.rows.find((x) => x.employee.name === "Sameer Khan").slip.id;
+    d = ok(call2("saveSlip", { id: sSlip, event_days: 2, days_off: 3 }), "Sameer: two event days and three days off");
+    check("base, event pay at his rate, and unpaid leave together", d.slip.pay_type === "monthly" && d.slip.base_salary === 18000 && cat(d, "Event pay").amount === 1400 && cat(d, "Unpaid leave").amount === 1200 && d.slip.net_salary === 18000 + 1400 - 1200, d);
+    const lines = d.text.split("\n");
+    check("his slip keeps the base row, with event pay after it", lines.indexOf(row("Base salary", "₹18,000")) > 0 && lines.indexOf(row("Event pay (2 days × ₹700)", "₹1,400")) === lines.indexOf(row("Base salary", "₹18,000")) + 1 && /Days off : 3 \(1 paid holiday, 2 unpaid\)/.test(d.text), d.text);
+    d = ok(call2("saveSlip", { id: sSlip, event_days: 0 }), "no event days after all");
+    check("the event line goes", !cat(d, "Event pay") && d.slip.net_salary === 18000 - 1200, d.items);
+    ok(call2("finalizeSlip", { id: sSlip }), "finalize Sameer");
+    d = ok(call2("getSlip", { id: sSlip }), "get Sameer's slip");
+    check("his PDF keeps the days-off box and the base row", /Days off/.test(ev.drive.items.get(/\/d\/([^/]+)/.exec(d.slip.pdf_url)[1]).html) && /Base salary/.test(ev.drive.items.get(/\/d\/([^/]+)/.exec(d.slip.pdf_url)[1]).html));
+
+    // ---- a month she did not work: listed, nothing pending ----
+    ok(call2("prepareMonth", { month: "2026-08" }), "prepare August");
+    month = ok(call2("listMonth", { month: "2026-08" }), "August");
+    check("August: Sameer's draft, Ayesha on call, nothing to start", month.summary.employees === 1 && month.summary.on_call === 1 && month.summary.not_started === 0 && month.rows[0].slip === null, month.summary);
+    check("history shows the slip as event days", ok(call2("employeeSlips", { employee_id: ayesha.id }), "history").map((x) => x.pay_type + ":" + x.event_days).join() === "event:5");
+
+    // ---- changing how someone is paid ----
+    const moved = ok(call2("saveEmployee", Object.assign({}, sameer, { pay_type: "event", day_rate: 900 })), "Sameer moves to per event day");
+    check("his base is dropped, and it is logged", moved.base_salary === 0 && moved.pay_type === "event" && ok(call2("listLogs", { q: "sameer" }), "log").some((l) => /base salary 18000, event day 700 → per event day 900/.test(l.details)));
+    check("his final slip is as it was", ok(call2("getSlip", { id: sSlip }), "slip").slip.base_salary === 18000);
+    const augDraft = month.rows.find((x) => x.employee.name === "Sameer Khan").slip.id;
+    check("an open draft keeps the pay type it was made with", ok(call2("saveSlip", { id: augDraft }), "save the August draft").slip.pay_type === "monthly");
+
+    // "Event pay" belongs to the app: it cannot be made an earning type by hand
+    ok(call2("saveSettings", { settings: { earning_types: "Event pay, Bonus" } }), "try to add Event pay as a type");
+    check("it is dropped from the list", ok(call2("getSettings", {}), "settings").earning_types === "Bonus");
+}
+
+/* ================= a sheet from before this update ================= */
+{
+    // take the new columns out of the schema, set up, and add data the way the previous version did
+    const old = createEnv();
+    const oldRun = (code) => vm.runInContext(code, old.ctx);
+    oldRun(`var __new = { Employees: ["pay_type", "day_rate"], Salary_Slips: ["pay_type", "event_days", "event_rate"] }; var __types = {};
+        Object.keys(__new).forEach((t) => __new[t].forEach((k) => { __types[t + "." + k] = SCHEMA[t][k]; delete SCHEMA[t][k]; }));
+        var __w = [Object.keys(SCHEMA.Employees).length, Object.keys(SCHEMA.Salary_Slips).length]; // how wide the old tabs are`);
+    old.ctx.setupSheets();
+    const t = old.call("login", { email: "owner@groovy.test", password: /Password: (\S+)/.exec(old.alerts.pop())[1] }).data.token;
+    const asha = ok(old.call("saveEmployee", { emp_no: 3, name: "Asha Khan", designation: "Salesperson Kiosk", doj: "2024-01-12", base_salary: 15000 }, t), "old version: add an employee");
+    const slip = ok(old.call("saveSlip", { employee_id: asha.id, month: "2026-09", days_off: 3 }, t), "old version: a slip");
+    ok(old.call("finalizeSlip", { id: slip.slip.id }, t), "old version: finalize");
+    const snapshot = `resetReqCache_(), JSON.stringify([sheet_("Employees").getRange(2, 1, 1, __w[0]).getValues(), sheet_("Salary_Slips").getRange(2, 1, 1, __w[1]).getValues()])`;
+    const before = oldRun(snapshot);
+
+    // the new code arrives
+    oldRun(`Object.keys(__new).forEach((t) => __new[t].forEach((k) => (SCHEMA[t][k] = __types[t + "." + k])));`);
+    check("before Setup is run, the app says to run it", old.call("listEmployees", {}, t).code === "SETUP" && /run Groovy Employees → 1\. Setup/.test(old.call("listMonth", { month: "2026-09" }, t).message));
+    old.ctx.setupSheets();
+    const said = old.alerts.pop();
+    check("Setup adds the columns and says so", /Employees \(\+pay_type, day_rate\)/.test(said) && /Salary_Slips \(\+pay_type, event_days, event_rate\)/.test(said), said);
+    check("the rows already there are untouched", oldRun(snapshot) === before && before.length > 200);
+    const e = ok(old.call("listEmployees", {}, t), "list after Setup")[0];
+    check("an employee from before is on a monthly salary", e.pay_type === "monthly" && e.day_rate === 0 && e.base_salary === 15000, e);
+    const d = ok(old.call("getSlip", { id: slip.slip.id }, t), "the old slip");
+    check("the old slip reads as it did", d.slip.pay_type === "monthly" && d.slip.event_days === 0 && d.slip.net_salary === 14000 && /Base salary +₹15,000/.test(d.text) && /Days off : 3/.test(d.text) && !/Event pay/.test(d.text), d.text);
+    check("and its month counts as before", ok(old.call("listMonth", { month: "2026-09" }, t), "month").summary.finals === 1);
+    ok(old.call("saveEmployee", Object.assign({}, e, { phone: "9000000002" }), t), "edit them with the new version");
+    check("a new slip for them works", ok(old.call("saveSlip", { employee_id: e.id, month: "2026-08", event_days: 1, event_rate: 600 }, t), "new slip").slip.net_salary === 15600);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -64,7 +64,17 @@ export default function Employees() {
                   </div>
                   <div className="sub ellipsis">{[e.designation, e.location].filter(Boolean).join(" · ")}</div>
                 </div>
-                {e.status === "left" ? <span className="badge bad">Left</span> : <b className="money small">{inr(e.base_salary)}</b>}
+                {e.status === "left" ? (
+                  <span className="badge bad">Left</span>
+                ) : e.pay_type === "event" ? (
+                  // no base salary: what one event day pays
+                  <span className="money small right">
+                    <b>{inr(e.day_rate)}</b>
+                    <span className="muted"> / day</span>
+                  </span>
+                ) : (
+                  <b className="money small">{inr(e.base_salary)}</b>
+                )}
               </button>
             ))}
           </div>

@@ -73,7 +73,7 @@ function splitEmails_(s) {
 }
 
 // "Overtime, bonus ,Overtime" → "Overtime, bonus": trimmed, no blanks, no repeats, and never one of
-// the two lines the app writes itself
+// the lines the app writes itself
 function cleanTypeList_(s) {
     const seen = {};
     return String(s || "")
@@ -81,7 +81,7 @@ function cleanTypeList_(s) {
         .map((t) => t.trim().slice(0, 40))
         .filter((t) => {
             const k = t.toLowerCase();
-            if (!t || seen[k] || k === LEAVE_CATEGORY_.toLowerCase() || k === HOLIDAY_CATEGORY_.toLowerCase()) return false;
+            if (!t || seen[k] || AUTO_CATEGORIES_.indexOf(k) >= 0) return false;
             seen[k] = true;
             return true;
         })
