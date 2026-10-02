@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, FilePlus2, Send, Users } from "lucide-react";
 import { useApp } from "../store";
 import { api } from "../lib/api";
@@ -21,6 +21,12 @@ export default function Payroll({ month: fromRoute }) {
   // the month in the address, so Back from a slip returns to the month it belongs to
   const go = (m) => navigate("payroll/" + m, { replace: true });
   const s = data ? data.summary : null;
+  // by Emp No., lowest first (as numbers: 10 comes after 9), the same order as the Employees page.
+  // The copy is because sort() would otherwise reorder the fetched list in place.
+  const rows = useMemo(
+    () => (data ? [...data.rows].sort((a, b) => Number(a.employee.emp_no) - Number(b.employee.emp_no) || String(a.employee.name).localeCompare(String(b.employee.name))) : []),
+    [data],
+  );
   const toEmail = s ? s.finals - s.emailed : 0;
 
   const act = async (label, fn) => {
@@ -51,7 +57,7 @@ export default function Payroll({ month: fromRoute }) {
     });
 
   const emailAll = async () => {
-    const without = data.rows.filter((r) => r.slip && r.slip.status === "final" && !r.slip.emailed_at && !r.employee.email).map((r) => r.employee.name);
+    const without = rows.filter((r) => r.slip && r.slip.status === "final" && !r.slip.emailed_at && !r.employee.email).map((r) => r.employee.name);
     const sending = toEmail - without.length;
     if (!sending) return toast("None of the slips waiting has an email address on the profile.", "warn", 4000);
     const text =
@@ -72,7 +78,7 @@ export default function Payroll({ month: fromRoute }) {
   };
 
   const exportCsv = () => {
-    const text = toCSV(data.rows, [
+    const text = toCSV(rows, [
       { label: "Emp No", get: (r) => r.employee.emp_no },
       { label: "Name", get: (r) => r.employee.name },
       { label: "Role", get: (r) => r.employee.designation },
@@ -144,7 +150,7 @@ export default function Payroll({ month: fromRoute }) {
               </div>
             </div>
             <div className="list mt">
-              {data.rows.map((r) => (
+              {rows.map((r) => (
                 <button key={r.employee.id} className="list-item" disabled={busy} onClick={() => open(r)}>
                   <Avatar name={r.employee.name} />
                   <div className="grow">
