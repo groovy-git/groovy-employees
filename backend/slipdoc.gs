@@ -117,7 +117,7 @@ function slipText_(s, items) {
     lines.push(String(biz.business_name || "").toUpperCase());
     lines.push("Salary Slip - " + monthLabel_(s.month));
     lines.push("");
-    lines.push("Employee : " + s.employee_name + " (No. " + s.emp_no + ")");
+    lines.push("Employee : " + s.employee_name + " (Emp No. " + s.emp_no + ")");
     lines.push("Role     : " + s.designation);
     if (s.location) lines.push("Location : " + s.location);
     if (s.doj) lines.push("Joined   : " + niceDate_(s.doj));
@@ -253,7 +253,7 @@ function slipPdfHtml_(s, items) {
         "SALARY SLIP · " + e(monthLabel_(s.month).toUpperCase()) + "</td></tr></table>" +
         (s.status !== "final" ? '<div style="color:#c62828;font-weight:bold;font-size:14px;text-align:center;margin:-6px 0 12px">DRAFT</div>' : "") +
         "<table><tr>" +
-        cell("Employee", "<b>" + e(s.employee_name) + "</b><br>No. " + e(s.emp_no)) +
+        cell("Employee", "<b>" + e(s.employee_name) + "</b><br>Emp No. " + e(s.emp_no)) +
         cell("Role", e(s.designation) + (s.location ? "<br>" + e(s.location) : "")) +
         cell("Date of joining", e(niceDate_(s.doj))) +
         cell("Days off", e(daysOffNote_(s))) +

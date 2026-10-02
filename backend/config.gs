@@ -124,6 +124,16 @@ const DEFAULT_SETTINGS = {
     salary_days: "30",
     // paid days off a month. Days off beyond these are unpaid; a holiday not taken is paid extra.
     paid_holidays: "1",
+    // the roles an employee can be given, one per line (a title may hold a comma or a dash)
+    roles: [
+        "Chief Executive Officer",
+        "Director – Strategic Alliances",
+        "Director – Business Development",
+        "Store Manager",
+        "Salesperson Kiosk",
+        "Salesperson Event",
+        "Logistics Executive",
+    ].join("\n"),
     // what "+ Add" offers on a slip. The two lines made from the days off are not in these lists.
     earning_types: "Overtime, Commission, Allowance, Bonus, Other",
     deduction_types: "Advance, Penalty, Other",

@@ -73,7 +73,7 @@ export default function Payroll({ month: fromRoute }) {
 
   const exportCsv = () => {
     const text = toCSV(data.rows, [
-      { label: "Employee no", get: (r) => r.employee.emp_no },
+      { label: "Emp No", get: (r) => r.employee.emp_no },
       { label: "Name", get: (r) => r.employee.name },
       { label: "Role", get: (r) => r.employee.designation },
       { label: "Location", get: (r) => r.employee.location },
@@ -148,7 +148,7 @@ export default function Payroll({ month: fromRoute }) {
                   <div className="grow">
                     <div className="title ellipsis">{r.employee.name}</div>
                     <div className="sub ellipsis">
-                      No. {r.employee.emp_no} · {r.employee.designation}
+                      Emp No. {r.employee.emp_no} · {r.employee.designation}
                     </div>
                   </div>
                   <div className="right">

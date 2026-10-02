@@ -53,7 +53,7 @@ export default function EmployeeDetail({ id }) {
     <>
       <TopBar
         title={e.name}
-        sub={`No. ${e.emp_no}`}
+        sub={`Emp No. ${e.emp_no}`}
         back="employees"
         right={
           <>

@@ -74,7 +74,7 @@ function Header({ d }) {
       <div className="grow">
         <div className="bold serif" style={{ fontSize: 17 }}>{s.employee_name}</div>
         <div className="small muted">
-          No. {s.emp_no} · {[s.designation, s.location].filter(Boolean).join(" · ")}
+          Emp No. {s.emp_no} · {[s.designation, s.location].filter(Boolean).join(" · ")}
         </div>
       </div>
       <SlipBadge slip={s} />

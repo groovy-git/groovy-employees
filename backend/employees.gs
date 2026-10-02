@@ -34,6 +34,18 @@ function cleanRecurring_(list) {
         .slice(0, 12);
 }
 
+/**
+ * The role as the list in Settings spells it. A role must come from that list — with one exception:
+ * an employee keeps the role they already have, even if it was typed before the list existed or has
+ * since been taken off it, so that correcting a phone number never forces a change of title.
+ */
+function roleFor_(wanted, existing) {
+    if (existing && str_(existing.designation) === wanted) return wanted;
+    const hit = roles_().find((r) => r.toLowerCase() === wanted.toLowerCase());
+    if (!hit) fail_("“" + wanted + "” is not one of the roles. Choose one from the list, or add it in More → Settings → Roles.");
+    return hit;
+}
+
 function employeeOut_(e, slips) {
     return {
         id: e.id, emp_no: e.emp_no, name: e.name, designation: e.designation, location: e.location,
@@ -67,9 +79,9 @@ function apiSaveEmployee_(p, ctx) {
     const dob = str_(p.dob);
     const email = str_(p.email).toLowerCase();
     const base = r2_(num_(p.base_salary));
-    if (!(empNo > 0) || Math.floor(empNo) !== empNo) fail_("Employee number must be a whole number, 1 or more");
+    if (!(empNo > 0) || Math.floor(empNo) !== empNo) fail_("Emp No. must be a whole number, 1 or more");
     if (!name) fail_("Name is required");
-    if (!designation) fail_("Role / designation is required");
+    if (!designation) fail_("Choose a role");
     if (!validDate_(doj)) fail_("Enter the date of joining");
     if (dob) {
         if (!validDate_(dob)) fail_("Date of birth is not a valid date");
@@ -81,16 +93,17 @@ function apiSaveEmployee_(p, ctx) {
 
     return withLock_(() => {
         const clash = rows_("Employees").find((e) => e.emp_no === empNo && e.id !== Number(p.id || 0));
-        if (clash) fail_("Employee number " + empNo + " already belongs to " + clash.name);
+        if (clash) fail_("Emp No. " + empNo + " already belongs to " + clash.name);
+        const existing = p.id ? findBy_("Employees", "id", Number(p.id)) : null;
+        if (p.id && !existing) fail_("Employee not found");
         const now = nowStr_();
         const fields = {
-            emp_no: empNo, name, designation, location: str_(p.location), dob, doj,
+            emp_no: empNo, name, designation: roleFor_(designation, existing), location: str_(p.location), dob, doj,
             phone: str_(p.phone).slice(0, 20), email, address: str_(p.address), base_salary: base,
             recurring: cleanRecurring_(p.recurring), notes: str_(p.notes), updated_at: now,
         };
         if (p.id) {
-            const e = findBy_("Employees", "id", Number(p.id));
-            if (!e) fail_("Employee not found");
+            const e = existing;
             if (e.status === "left" && e.dol && e.dol < doj) fail_("Date of joining is after the date of leaving (" + e.dol + ")");
             const was = e.base_salary;
             Object.assign(e, fields);
@@ -101,7 +114,7 @@ function apiSaveEmployee_(p, ctx) {
         }
         const e = Object.assign({ id: nextId_("Employees"), status: "active", dol: "", created_at: now }, fields);
         appendRows_("Employees", [e]);
-        log_(ctx, "CREATE", "Employees", e.id, name + " (No. " + empNo + ") — base salary " + base);
+        log_(ctx, "CREATE", "Employees", e.id, name + " (Emp No. " + empNo + ") — base salary " + base);
         return { message: "Employee added", data: employeeOut_(e, 0) };
     });
 }
@@ -130,7 +143,7 @@ function apiDeleteEmployee_(p, ctx) {
         if (!e) fail_("Employee not found");
         if (slipCounts_()[e.id]) fail_(e.name + " has salary slips. Mark them as left instead, so the slips stay.");
         deleteRow_("Employees", e);
-        log_(ctx, "DELETE", "Employees", e.id, e.name + " (No. " + e.emp_no + ")");
+        log_(ctx, "DELETE", "Employees", e.id, e.name + " (Emp No. " + e.emp_no + ")");
         return { message: "Employee deleted" };
     });
 }

@@ -24,7 +24,7 @@ export default function Employees() {
     const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     return (list || []).filter((e) => {
       if (show !== "all" && (e.status === "left") !== (show === "left")) return false;
-      const hay = `${e.name} ${e.designation} ${e.location} ${e.phone} no ${e.emp_no}`.toLowerCase();
+      const hay = `${e.name} ${e.designation} ${e.location} ${e.phone} emp no ${e.emp_no}`.toLowerCase();
       return words.every((w) => hay.includes(w));
     });
   }, [list, q, show]);
@@ -33,7 +33,7 @@ export default function Employees() {
     <>
       <TopBar title="Employees" right={loading && list ? <Updating /> : null} />
       <div className="page">
-        <SearchBar value={q} onChange={setQ} placeholder="Search name, role, location or number" />
+        <SearchBar value={q} onChange={setQ} placeholder="Search name, role or Emp No." />
         <div className="mt">
           <Chips
             value={show}
@@ -60,7 +60,7 @@ export default function Employees() {
                 <Avatar name={e.name} />
                 <div className="grow">
                   <div className="title ellipsis">
-                    {e.name} <span className="muted small">· No. {e.emp_no}</span>
+                    {e.name} <span className="muted small">· Emp No. {e.emp_no}</span>
                   </div>
                   <div className="sub ellipsis">{[e.designation, e.location].filter(Boolean).join(" · ")}</div>
                 </div>

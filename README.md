@@ -108,11 +108,13 @@ It works the same in a laptop browser.
 
 1. Log in, then open **More → Settings**:
     - **Company**: the name, address, phone and email that head every slip.
+    - **Roles**: the list an employee's role is chosen from, one per line. Add your own here. Taking a role off the list doesn't change anyone who already has it.
     - **Salary rules**: check **30** days in a salary month and **1** paid holiday.
     - **Slip & email**: the line at the foot of the slip, and an address to copy on every slip email if you want one (your accountant, say).
 2. **More → Admins**: add anyone else who should manage payroll. Everyone listed there sees every salary.
 3. **Employees → Add employee** for each person:
-    - **Employee no.** is the number that person has as `id` in the Groovy Kiosk sheet. You type it; the app only checks that no two employees share one. For someone who isn't in Kiosk, use any unused number.
+    - **Emp No.** is the number that person has as `id` in the Groovy Kiosk sheet. You type it; the app only checks that no two employees share one. For someone who isn't in Kiosk, use any unused number.
+    - **Role** is chosen from the list in Settings → Roles.
     - **Email** is where their slip is sent. Without one the slip is still made and filed, just not emailed.
     - **Added / Deducted every month**: fixed lines such as a travel allowance. They are filled into each new slip.
 
@@ -141,8 +143,8 @@ The same slip is shown in the app, sent as the email, copied for WhatsApp and pr
 GROOVY BUSINESS GROUP
 Salary Slip - September 2026
 
-Employee : Asha Khan (No. 3)
-Role     : Salesperson
+Employee : Asha Khan (Emp No. 3)
+Role     : Salesperson Kiosk
 Joined   : 12 Jan 2024
 Days off : 3 (1 paid holiday, 2 unpaid)
 
@@ -233,7 +235,7 @@ Groovy Employees sits beside Groovy Kiosk, so it takes on whatever sharing the f
 
 ```
 backend/   Apps Script (.gs): api.gs (doPost + action table), auth, employees, slips (the maths), slipdoc (text, PDF, email), setup
-  dev/     mock-gas.js (in-memory Apps Script, Sheets and Drive), e2e.js (234 checks), server.js (local API)
+  dev/     mock-gas.js (in-memory Apps Script, Sheets and Drive), e2e.js (249 checks), server.js (local API)
 frontend/  Vite + React PWA: src/pages (screens), src/components, src/lib (api, slip figures, printing)
 ```
 

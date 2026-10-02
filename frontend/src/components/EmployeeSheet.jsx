@@ -34,6 +34,10 @@ export default function EmployeeSheet({ e, all = [], onClose, onSaved }) {
   const set = (k) => (ev) => setF({ ...f, [k]: ev.target.value });
   const salaryDays = Number(settings.salary_days) || 30;
   const base = Number(f.base_salary) || 0;
+  // the roles from Settings. Someone whose role is no longer on that list (or was typed before there
+  // was one) keeps it as a choice of their own, so opening and saving them never changes their role.
+  const roles = String(settings.roles || "").split("\n").map((r) => r.trim()).filter(Boolean);
+  const ownRole = e.designation && !roles.includes(e.designation) ? e.designation : "";
 
   const run = async (label, action, payload, done) => {
     setBusy(true);
@@ -57,7 +61,7 @@ export default function EmployeeSheet({ e, all = [], onClose, onSaved }) {
       footer={<Button className="block big" loading={busy} onClick={() => run("Saving employee…", "saveEmployee", f, onSaved)}>Save</Button>}
     >
       <div className="grid-2">
-        <Field label="Employee no." hint="Their id in the Groovy Kiosk sheet">
+        <Field label="Emp No." hint="Their id in the Groovy Kiosk sheet">
           <input className="input" inputMode="numeric" value={f.emp_no ?? ""} onChange={(ev) => setF({ ...f, emp_no: ev.target.value.replace(/\D/g, "") })} />
         </Field>
         <Field label="Date of joining">
@@ -67,15 +71,22 @@ export default function EmployeeSheet({ e, all = [], onClose, onSaved }) {
       <Field label="Full name">
         <input className="input" value={f.name || ""} onChange={set("name")} autoCapitalize="words" />
       </Field>
-      <div className="grid-2">
-        <Field label="Role / designation">
-          <input className="input" list="ge-designations" value={f.designation || ""} onChange={set("designation")} autoCapitalize="words" />
-        </Field>
-        <Field label="Location (optional)">
-          <input className="input" list="ge-locations" value={f.location || ""} onChange={set("location")} placeholder="Kiosk or office" autoCapitalize="words" />
-        </Field>
-      </div>
-      <Suggest id="ge-designations" values={all.map((x) => x.designation)} />
+      <Field label="Role" hint={ownRole && f.designation === ownRole ? "This role is not on the list in Settings. It is kept until you choose another." : "Add more roles in More → Settings → Roles"}>
+        <select className="input" value={f.designation || ""} onChange={set("designation")}>
+          <option value="" disabled>
+            Choose a role
+          </option>
+          {roles.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+          {ownRole && <option value={ownRole}>{ownRole}</option>}
+        </select>
+      </Field>
+      <Field label="Location (optional)">
+        <input className="input" list="ge-locations" value={f.location || ""} onChange={set("location")} placeholder="Kiosk or office" autoCapitalize="words" />
+      </Field>
       <Suggest id="ge-locations" values={all.map((x) => x.location)} />
 
       <Field label="Monthly base salary" hint={base > 0 ? `One day's salary: ${inr(Math.round((base / salaryDays) * 100) / 100)} (base ÷ ${salaryDays})` : null}>

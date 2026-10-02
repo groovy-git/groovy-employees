@@ -38,8 +38,32 @@ function apiGetSettings_(p, ctx) {
 const EDITABLE_SETTINGS_ = [
     "business_name", "tagline", "address", "phone", "email", "currency_symbol",
     "salary_days", "paid_holidays", "earning_types", "deduction_types", "slip_footer",
-    "email_slips", "slip_email_cc",
+    "email_slips", "slip_email_cc", "roles",
 ];
+
+// the roles as a list, in the order Settings has them
+function roles_() {
+    return String(setting_("roles") || "")
+        .split("\n")
+        .map((r) => r.trim())
+        .filter(Boolean);
+}
+
+// one role per line → trimmed, no blank lines, no repeats (whatever the capitals)
+function cleanRoleList_(s) {
+    const seen = {};
+    return String(s || "")
+        .split(/\r?\n/)
+        .map((r) => r.replace(/\s+/g, " ").trim().slice(0, 60))
+        .filter((r) => {
+            const k = r.toLowerCase();
+            if (!r || seen[k]) return false;
+            seen[k] = true;
+            return true;
+        })
+        .slice(0, 60)
+        .join("\n");
+}
 
 function splitEmails_(s) {
     return String(s || "")
@@ -86,6 +110,10 @@ function apiSaveSettings_(p, ctx) {
         vals[k] = cleanTypeList_(vals[k]);
         if (!vals[k]) fail_("Keep at least one " + (k === "earning_types" ? "earning" : "deduction") + " type");
     });
+    if (vals.roles !== undefined) {
+        vals.roles = cleanRoleList_(vals.roles);
+        if (!vals.roles) fail_("Keep at least one role");
+    }
     if (vals.email_slips !== undefined && ["yes", "no"].indexOf(vals.email_slips) < 0) fail_("Invalid email option");
     if (vals.slip_email_cc !== undefined) {
         const list = splitEmails_(vals.slip_email_cc);

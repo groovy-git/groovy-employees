@@ -141,18 +141,37 @@ ok(call("resetPassword", { email: "sana@gbg.in", otp, password: "newpass1" }), "
 ok(call("login", { email: "sana@gbg.in", password: "newpass1" }), "login with the new password");
 
 // ---- employees ----
-const emp = (o) => Object.assign({ designation: "Salesperson", doj: "2024-01-12", base_salary: 15000 }, o);
+const emp = (o) => Object.assign({ designation: "Salesperson Kiosk", doj: "2024-01-12", base_salary: 15000 }, o);
 const asha = ok(call("saveEmployee", emp({ emp_no: 3, name: "Asha Khan", email: "Asha@Example.com", phone: "09876543210", dob: "1998-11-03", location: "Kondhwa" }), T), "add Asha");
 check("employee saved as typed", asha.emp_no === 3 && asha.email === "asha@example.com" && asha.phone === "09876543210" && asha.status === "active", asha);
 refused(call("saveEmployee", emp({ emp_no: 3, name: "Someone Else" }), T), "duplicate employee number", /already belongs to Asha Khan/);
 refused(call("saveEmployee", emp({ emp_no: 0, name: "Zero" }), T), "employee number must be 1 or more", /whole number/);
 refused(call("saveEmployee", emp({ emp_no: 2.5, name: "Half" }), T), "employee number must be whole", /whole number/);
 refused(call("saveEmployee", emp({ emp_no: 9, name: "" }), T), "name required", /Name/);
-refused(call("saveEmployee", emp({ emp_no: 9, name: "No Role", designation: "" }), T), "designation required", /designation/);
+refused(call("saveEmployee", emp({ emp_no: 9, name: "No Role", designation: "" }), T), "role required", /Choose a role/);
 refused(call("saveEmployee", emp({ emp_no: 9, name: "No Pay", base_salary: 0 }), T), "base salary required", /base salary/);
 refused(call("saveEmployee", emp({ emp_no: 9, name: "Bad Date", doj: "12/01/2024" }), T), "joining date required", /date of joining/);
 refused(call("saveEmployee", emp({ emp_no: 9, name: "Bad Mail", email: "not-an-email" }), T), "email checked", /Email/);
 refused(call("saveEmployee", emp({ emp_no: 9, name: "Baby", dob: "2024-06-01" }), T), "born after joining", /before the date of joining/);
+
+// ---- roles: a list in Settings, and an employee's role must come from it ----
+const ROLES = ["Chief Executive Officer", "Director – Strategic Alliances", "Director – Business Development", "Store Manager", "Salesperson Kiosk", "Salesperson Event", "Logistics Executive"];
+check("the seven roles are there from the start", boot.settings.roles === ROLES.join("\n"), boot.settings.roles);
+refused(call("saveEmployee", emp({ emp_no: 30, name: "Role Tester", designation: "Astronaut" }), T), "a role not on the list is refused", /not one of the roles/);
+let tester = ok(call("saveEmployee", emp({ emp_no: 30, name: "Role Tester", designation: "director – business development" }), T), "role typed in small letters");
+check("role stored as the list spells it", tester.designation === "Director – Business Development", tester.designation);
+// an admin adds a role; the list is tidied on the way in
+ok(call("saveSettings", { settings: { roles: ROLES.join("\n") + "\n\n  Accountant \r\naccountant\n Sales   Lead \n" } }, T), "add roles in Settings");
+check("role list cleaned: blank lines, repeats, stray spaces", ok(call("getSettings", {}, T), "settings").roles === ROLES.concat(["Accountant", "Sales Lead"]).join("\n"));
+tester = ok(call("saveEmployee", Object.assign({}, tester, { designation: "Accountant" }), T), "the new role can be given");
+refused(call("saveSettings", { settings: { roles: " \n \n" } }, T), "an empty role list is refused", /at least one role/);
+// the role is taken off the list again: whoever holds it keeps it, nobody new can be given it
+ok(call("saveSettings", { settings: { roles: ROLES.join("\n") } }, T), "remove the added roles");
+tester = ok(call("saveEmployee", Object.assign({}, tester, { phone: "9000000001" }), T), "edit someone whose role left the list");
+check("their role is kept", tester.designation === "Accountant" && tester.phone === "9000000001", tester);
+refused(call("saveEmployee", emp({ emp_no: 31, name: "Second Accountant", designation: "Accountant" }), T), "a removed role cannot be given to someone new", /not one of the roles/);
+refused(call("saveEmployee", Object.assign({}, tester, { designation: "Astronaut" }), T), "nor can they move to another role that isn't listed", /not one of the roles/);
+ok(call("deleteEmployee", { id: tester.id }, T), "delete the role tester");
 
 const imran = ok(
     call("saveEmployee", emp({
@@ -194,7 +213,7 @@ refused(call("saveSlip", { employee_id: 999, month: "2026-09" }, T), "unknown em
 let d = ok(call("saveSlip", { employee_id: asha.id, month: "2026-09" }, T), "new draft for Asha, September 2026");
 const slipId = d.slip.id;
 check("draft starts with the holiday taken: nothing added or deducted", d.slip.status === "draft" && d.slip.days_off === 1 && d.items.length === 0 && d.slip.net_salary === 15000, d);
-check("slip carries the employee as they are", d.slip.emp_no === 3 && d.slip.employee_name === "Asha Khan" && d.slip.designation === "Salesperson" && d.slip.salary_days === 30 && d.slip.paid_holidays === 1, d.slip);
+check("slip carries the employee as they are", d.slip.emp_no === 3 && d.slip.employee_name === "Asha Khan" && d.slip.designation === "Salesperson Kiosk" && d.slip.salary_days === 30 && d.slip.paid_holidays === 1, d.slip);
 check("EXISTS code on a second slip", call("saveSlip", { employee_id: asha.id, month: "2026-09" }, T).code === "EXISTS");
 
 // the slip from the plan: 3 days off, overtime, commission, advance
@@ -215,8 +234,8 @@ const want = [
     "GROOVY BUSINESS GROUP",
     "Salary Slip - September 2026",
     "",
-    "Employee : Asha Khan (No. 3)",
-    "Role     : Salesperson",
+    "Employee : Asha Khan (Emp No. 3)",
+    "Role     : Salesperson Kiosk",
     "Location : Kondhwa",
     "Joined   : 12 Jan 2024",
     "Days off : 3 (1 paid holiday, 2 unpaid)",
@@ -269,9 +288,9 @@ check("the employee's own base is untouched", ok(call("listEmployees", {}, T), "
 ok(call("saveSlip", { id: slipId, base_salary: 15000, notes: "Advance of 2,000 taken on 5 Sep" }, T), "base back, note added");
 
 // a draft follows the profile; the number and name on it change with the employee
-ok(call("saveEmployee", Object.assign({}, asha, { designation: "Senior Salesperson" }), T), "promote Asha");
+ok(call("saveEmployee", Object.assign({}, asha, { designation: "Store Manager" }), T), "promote Asha");
 d = ok(call("saveSlip", { id: slipId }, T), "save the draft again");
-check("draft picks up the new designation", d.slip.designation === "Senior Salesperson", d.slip);
+check("draft picks up the new designation", d.slip.designation === "Store Manager", d.slip);
 
 // negative net cannot be finalized
 const big = ok(call("saveSlip", { employee_id: noMail.id, month: "2026-09", items: [{ kind: "deduction", category: "Advance", label: "Advance", amount: 20000 }] }, T), "Rahul: advance bigger than the salary");
@@ -291,7 +310,7 @@ check("message says where it went", /Slip finalized\. Emailed to asha@example\.c
 const pdf = env.drive.items.get(/\/d\/([^/]+)/.exec(d.slip.pdf_url)[1]);
 check("PDF filed by FY, month, number-name-month", pathOf(pdf) === "My Drive/GBG/Groovy Employees/Salary_Slips/FY 2026-27/09/3-Asha-2026-09.pdf", pathOf(pdf));
 check("PDF is a PDF", pdf.mime === "application/pdf");
-check("PDF holds the slip", ["GROOVY", "Groovy Business Group", "SEPTEMBER 2026", "Asha Khan", "No. 3", "Senior Salesperson", "Unpaid leave (2 days)", "₹14,050", "Rupees Fourteen Thousand Fifty only", "Advance of 2,000"].every((t) => pdf.html.toUpperCase().indexOf(t.toUpperCase()) >= 0), pdf.html);
+check("PDF holds the slip", ["GROOVY", "Groovy Business Group", "SEPTEMBER 2026", "Asha Khan", "Emp No. 3", "Store Manager", "Unpaid leave (2 days)", "₹14,050", "Rupees Fourteen Thousand Fifty only", "Advance of 2,000"].every((t) => pdf.html.toUpperCase().indexOf(t.toUpperCase()) >= 0), pdf.html);
 check("PDF is not marked draft", !/DRAFT/.test(pdf.html));
 const mail = env.mails[env.mails.length - 1];
 check("one email, to the employee", env.mails.length === mailsBefore + 1 && mail.to === "asha@example.com", mail);
@@ -304,9 +323,9 @@ check("slip remembers the email", d.slip.emailed_to === "asha@example.com" && !!
 refused(call("saveSlip", { id: slipId, days_off: 0 }, T), "a final slip cannot be edited", /final/);
 refused(call("deleteSlip", { id: slipId }, T), "a final slip cannot be deleted", /Reopen/);
 refused(call("finalizeSlip", { id: slipId }, T), "cannot finalize twice", /already final/);
-ok(call("saveEmployee", Object.assign({}, asha, { designation: "Salesperson", name: "Asha K. Khan", base_salary: 20000 }), T), "edit Asha after the slip is final");
+ok(call("saveEmployee", Object.assign({}, asha, { designation: "Salesperson Kiosk", name: "Asha K. Khan", base_salary: 20000 }), T), "edit Asha after the slip is final");
 d = ok(call("getSlip", { id: slipId }, T), "get the final slip");
-check("final slip keeps the old name, role and base", d.slip.employee_name === "Asha Khan" && d.slip.designation === "Senior Salesperson" && d.slip.base_salary === 15000, d.slip);
+check("final slip keeps the old name, role and base", d.slip.employee_name === "Asha Khan" && d.slip.designation === "Store Manager" && d.slip.base_salary === 15000, d.slip);
 refused(call("deleteEmployee", { id: asha.id }, T), "an employee with slips cannot be deleted", /has salary slips/);
 
 // a lost reply: the app retries with the same id and nothing happens twice
@@ -324,7 +343,7 @@ check("retried finalize: one email", e1.success && e2.success && env.mails.lengt
 d = ok(call("reopenSlip", { id: slipId }, T), "reopen Asha's slip");
 check("reopened: draft, no file, not emailed", d.slip.status === "draft" && !d.slip.pdf_url && !d.slip.emailed_at && pdf.trashed, d.slip);
 check("reopened draft follows the profile again", ok(call("saveSlip", { id: slipId, base_salary: 15000 }, T), "save").slip.employee_name === "Asha K. Khan");
-ok(call("saveEmployee", Object.assign({}, asha, { designation: "Salesperson" }), T), "Asha's name back");
+ok(call("saveEmployee", Object.assign({}, asha, { designation: "Salesperson Kiosk" }), T), "Asha's name back");
 d = ok(call("finalizeSlip", { id: slipId }, T), "finalize again, no email");
 const inFolder = [...env.drive.items.values()].filter((x) => x.kind === "file" && x.name === "3-Asha-2026-09.pdf");
 check("one live file of that name", inFolder.filter((x) => !x.trashed).length === 1 && inFolder.length === 2, inFolder.map((x) => x.trashed));

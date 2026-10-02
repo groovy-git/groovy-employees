@@ -319,14 +319,17 @@ function seedDemo() {
     const year = Number(todayStr_().slice(0, 4));
     const soon = dayFromToday_(9).slice(4); // a birthday nine days from now, so Home has something to show
 
+    // a role from the list in Settings; if the list was changed and no longer has it, the first one there
+    const role = (want) => (roles_().indexOf(want) >= 0 ? want : roles_()[0]);
+
     // [emp_no, name, designation, location, dob, doj, phone, base, recurring]
     const team = [
-        [1, "Imran Shaikh", "Store Manager", "Kondhwa", "1988" + soon, year - 5 + "-04-01", "9822012345", 32000, [{ kind: "earning", category: "Allowance", label: "Travel allowance", amount: 1500 }]],
-        [2, "Sameer Khan", "Salesperson", "Kondhwa", "1996-02-14", year - 3 + "-07-15", "9876543210", 18000, []],
-        [3, "Asha Khan", "Salesperson", "Kalyani Nagar", "1998-11-03", year - 2 + "-01-12", "9765432109", 15000, []],
-        [4, "Ayesha Pathan", "Salesperson", "Kalyani Nagar", "1999-06-21", year - 1 + "-03-01", "9890011223", 15000, [{ kind: "earning", category: "Allowance", label: "Phone allowance", amount: 300 }]],
-        [5, "Rahul Patil", "Stock Mover", "Kondhwa", "1994-09-30", year - 2 + "-10-05", "9850098500", 14000, []],
-        [6, "Zoya Shaikh", "Cashier", "Kondhwa", "2000-12-19", year - 1 + "-08-20", "9833445566", 16000, [{ kind: "deduction", category: "Advance", label: "Advance repayment", amount: 1000 }]],
+        [1, "Imran Shaikh", role("Store Manager"), "Kondhwa", "1988" + soon, year - 5 + "-04-01", "9822012345", 32000, [{ kind: "earning", category: "Allowance", label: "Travel allowance", amount: 1500 }]],
+        [2, "Sameer Khan", role("Salesperson Kiosk"), "Kondhwa", "1996-02-14", year - 3 + "-07-15", "9876543210", 18000, []],
+        [3, "Asha Khan", role("Salesperson Kiosk"), "Kalyani Nagar", "1998-11-03", year - 2 + "-01-12", "9765432109", 15000, []],
+        [4, "Ayesha Pathan", role("Salesperson Event"), "Kalyani Nagar", "1999-06-21", year - 1 + "-03-01", "9890011223", 15000, [{ kind: "earning", category: "Allowance", label: "Phone allowance", amount: 300 }]],
+        [5, "Rahul Patil", role("Logistics Executive"), "Kondhwa", "1994-09-30", year - 2 + "-10-05", "9850098500", 14000, []],
+        [6, "Zoya Shaikh", role("Salesperson Kiosk"), "Kondhwa", "2000-12-19", year - 1 + "-08-20", "9833445566", 16000, [{ kind: "deduction", category: "Advance", label: "Advance repayment", amount: 1000 }]],
     ];
     team.forEach((t) =>
         apiSaveEmployee_(

@@ -38,10 +38,21 @@ export default function SettingsPage() {
           onChange={setTab}
           options={[
             { value: "company", label: "Company" },
+            { value: "roles", label: "Roles" },
             { value: "payroll", label: "Salary rules" },
             { value: "slip", label: "Slip & email" },
           ]}
         />
+        {tab === "roles" && (
+          <div className="card mt">
+            <Field label="Roles" hint="One role on each line. These are the choices when you add or edit an employee.">
+              <textarea className="input" rows={Math.max(8, String(f.roles || "").split("\n").length + 1)} value={f.roles || ""} onChange={set("roles")} autoCapitalize="words" spellCheck={false} />
+            </Field>
+            <p className="small muted" style={{ margin: 0 }}>
+              Taking a role off this list doesn't change anyone who already has it, or any salary slip. They keep it until you choose another role for them.
+            </p>
+          </div>
+        )}
         {tab === "company" && (
           <div className="card mt">
             <Field label="Company name" hint="Heads every salary slip">
