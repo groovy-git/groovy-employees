@@ -213,6 +213,11 @@ Groovy Employees sits beside Groovy Kiosk, so it takes on whatever sharing the f
 - **Keep your own notes in a separate tab**, not in extra columns at the end of the app's tabs.
 - **Backups:** besides the monthly copy, **Groovy Employees → Back up now** makes one at any time, and Google Sheets keeps its own version history.
 - **Try it first on a test copy:** **Groovy Employees → 2. Load demo data** fills an empty sheet with six made-up employees and two months of slips.
+- **Going live after testing:** **Groovy Employees → 3. Reset all data…**, then type `RESET`.
+    - It deletes every employee, every salary slip and the activity log, and logs everyone out. The slip PDFs in `Salary_Slips` go to Drive's bin, where they can be recovered for 30 days.
+    - It keeps the admin logins and passwords, and everything in Settings (company, roles, salary rules).
+    - A copy of the Sheet as it was is saved in `Back_up` first. If that copy can't be made, nothing is deleted.
+    - This can't be undone from the app. To go back, use the copy in `Back_up`.
 
 ## Troubleshooting
 
@@ -235,7 +240,7 @@ Groovy Employees sits beside Groovy Kiosk, so it takes on whatever sharing the f
 
 ```
 backend/   Apps Script (.gs): api.gs (doPost + action table), auth, employees, slips (the maths), slipdoc (text, PDF, email), setup
-  dev/     mock-gas.js (in-memory Apps Script, Sheets and Drive), e2e.js (249 checks), server.js (local API)
+  dev/     mock-gas.js (in-memory Apps Script, Sheets and Drive), e2e.js (278 checks), server.js (local API)
 frontend/  Vite + React PWA: src/pages (screens), src/components, src/lib (api, slip figures, printing)
 ```
 

@@ -8,6 +8,7 @@ function onOpen() {
         .createMenu(APP.NAME)
         .addItem("1. Setup / repair sheets", "setupSheets")
         .addItem("2. Load demo data (test copy only)", "seedDemo")
+        .addItem("3. Reset all data (keep logins & settings)…", "resetAllData")
         .addSeparator()
         .addItem("Back up now", "backupNow")
         .addItem("Reset an admin password…", "resetAdminPassword")
@@ -23,6 +24,111 @@ function alert_(msg) {
     } catch (e) {
         console.log(msg); // run from the editor
     }
+}
+
+/* ---------- reset all data (going live after testing) ---------- */
+
+// the tabs that hold the data. Users (the admin logins) and Settings are not in this list: they are kept.
+const RESET_TABS_ = ["Employees", "Salary_Slips", "Slip_Items", "Activity_Logs", "Sessions"];
+
+function resetAllData() {
+    const ui = SpreadsheetApp.getUi();
+    const r = ui.prompt(
+        "Reset all data",
+        "This permanently deletes every employee, every salary slip with its lines, and the activity log. " +
+            "Everyone is logged out.\n\n" +
+            "The slip PDFs in Salary_Slips go to Drive's bin, where they can be recovered for 30 days.\n\n" +
+            "Kept: the admin logins and their passwords, and everything in Settings (company, roles, salary rules). " +
+            "Back_up is not touched.\n\n" +
+            "A copy of this sheet as it is now is saved in Back_up first.\n\n" +
+            "Type RESET to continue:",
+        ui.ButtonSet.OK_CANCEL,
+    );
+    if (r.getSelectedButton() !== ui.Button.OK || r.getResponseText().trim() !== "RESET") {
+        alert_("Nothing was changed.");
+        return;
+    }
+    let res;
+    try {
+        res = resetAllData_();
+    } catch (e) {
+        console.error("resetAllData_", e);
+        alert_("The reset did not run:\n\n" + (e.message || e) + "\n\nCheck the sheet before trying again.");
+        return;
+    }
+    const lines = RESET_TABS_.filter((t) => res.cleared[t]).map((t) => "  " + t.replace(/_/g, " ") + ": " + res.cleared[t]);
+    alert_(
+        "All data cleared.\n\n" +
+            (lines.length ? "Rows removed:\n" + lines.join("\n") + "\n\n" : "There was nothing to remove.\n\n") +
+            (res.pdfs < 0
+                ? "The slip PDFs could not be moved to Drive's bin — delete the Salary_Slips folder by hand.\n"
+                : "Slip PDFs moved to Drive's bin: " + res.pdfs + ".\n") +
+            "The sheet as it was just before is in Back_up/" + res.backup + ".\n\n" +
+            "Admin logins and settings were kept. Log in again in the app.",
+    );
+}
+
+/**
+ * Clear every employee, slip and log line; keep the logins and the settings.
+ *
+ * A copy of the sheet is made first, and if that fails nothing is cleared: this is the one action in
+ * the app that cannot be undone from inside it, so it never runs without something to go back to.
+ * Rows are emptied, not deleted, for the reason deleteRow_ gives — and so a column the owner added
+ * beside the app's own is left alone.
+ */
+function resetAllData_() {
+    resetReqCache_();
+    const backup = backupInto_(Utilities.formatDate(new Date(), APP.TZ, "yyyy-MM-dd HH-mm") + " before reset").folder;
+    const cleared = withLock_(() => {
+        const ended = logoutEveryone_();
+        const n = {};
+        RESET_TABS_.forEach((name) => {
+            const t = readTable_(name);
+            n[name] = t.rows.length;
+            const last = t.sh.getLastRow();
+            if (last >= 2) t.sh.getRange(2, 1, last - 1, t.keys.length).clearContent();
+            forgetTable_(name);
+        });
+        n.Sessions = ended; // that tab was already emptied by the logout above
+        log_({ user: { id: 0, name: "Sheet owner" } }, "RESET", "All", "", "All data cleared (logins and settings kept). Copy of the sheet from before: Back_up/" + backup);
+        return n;
+    });
+    // outside the lock: Drive is slow, and the data is already gone whether or not this works
+    let pdfs = -1;
+    try {
+        pdfs = trashSlipFiles_();
+    } catch (e) {
+        console.error("trashSlipFiles_", e);
+    }
+    return { backup, cleared, pdfs };
+}
+
+function countFiles_(folder) {
+    let n = 0;
+    const files = folder.getFiles();
+    while (files.hasNext()) {
+        files.next();
+        n++;
+    }
+    const subs = folder.getFolders();
+    while (subs.hasNext()) n += countFiles_(subs.next());
+    return n;
+}
+
+/**
+ * The PDFs of slips that no longer exist. The whole Salary_Slips folder goes to Drive's bin (30 days
+ * to change your mind); the next slip to be finalized makes a fresh one. Returns how many files it held.
+ */
+function trashSlipFiles_() {
+    let n = 0;
+    const it = sheetFolder_().getFoldersByName(SLIP_ROOT_);
+    while (it.hasNext()) {
+        const f = it.next();
+        if (f.isTrashed()) continue;
+        n += countFiles_(f);
+        f.setTrashed(true);
+    }
+    return n;
 }
 
 /* ---------- the Drive folder ---------- */

@@ -454,6 +454,70 @@ ok(call("login", { email: "sana@gbg.in", password: reset.password }), "login aft
 ok(call("logout", {}, T), "logout");
 check("logged out", call("listEmployees", {}, T).code === "AUTH_EXPIRED");
 
+// ---- reset all data: employees, slips and the log go; logins and settings stay ----
+const count = (tab) => run(`resetReqCache_(), rows_("${tab}").length`);
+const TR = ok(call("login", { email: "sana@gbg.in", password: reset.password }), "login before the reset").token;
+ok(call("saveSettings", { settings: { slip_footer: "Kept through the reset." } }, TR), "a setting changed before the reset");
+const had = { emps: count("Employees"), slips: count("Salary_Slips"), items: count("Slip_Items"), logs: count("Activity_Logs"), users: count("Users") };
+check("there is data to clear", had.emps >= 6 && had.slips >= 6 && had.items > 0 && had.logs > 20, had);
+const live = (name) => [...env.drive.items.values()].filter((x) => x.name === name && !x.trashed);
+const pdfsBefore = [...env.drive.items.values()].filter((x) => x.kind === "file" && /\.pdf$/.test(x.name) && !x.trashed && /Salary_Slips/.test(pathOf(x)) && !x.parent.trashed).length;
+const res = run("resetAllData_()");
+check("reset reports what it removed", res.cleared.Employees === had.emps && res.cleared.Salary_Slips === had.slips && res.cleared.Slip_Items === had.items && res.cleared.Activity_Logs === had.logs && res.cleared.Sessions >= 1, res.cleared);
+check("employees, slips and lines are gone", count("Employees") === 0 && count("Salary_Slips") === 0 && count("Slip_Items") === 0 && count("Sessions") === 0);
+check("the log starts again with the reset itself", count("Activity_Logs") === 1 && run(`rows_("Activity_Logs")[0].action`) === "RESET");
+check("admin logins are kept", count("Users") === had.users && had.users === 2);
+check("everyone is logged out", call("listEmployees", {}, TR).code === "AUTH_EXPIRED");
+const TA = ok(call("login", { email: "sana@gbg.in", password: reset.password }), "the same password still works after the reset").token;
+const kept = ok(call("getSettings", {}, TA), "settings after the reset");
+check("settings are kept", kept.slip_footer === "Kept through the reset." && kept.business_name === "Groovy Business Group" && kept.roles.split("\n").length === 7, kept);
+check("the app shows an empty company", ok(call("listEmployees", {}, TA), "list").length === 0 && ok(call("dashboard", {}, TA), "dashboard").active === 0);
+check("slip PDFs went to Drive's bin", res.pdfs === pdfsBefore && pdfsBefore >= 3 && live("Salary_Slips").length === 0, [res.pdfs, pdfsBefore]);
+const copy = [...env.drive.items.values()].find((x) => x.kind === "file" && / before reset$/.test(x.name));
+check("a copy of the sheet was saved first", !!copy && res.backup === copy.parent.name && /Groovy Employees\/Back_up\/[\d -]+ before reset\/Groovy Employees Data/.test(pathOf(copy)), copy && pathOf(copy));
+check("earlier backups are untouched", live("Back_up").length === 1 && [...env.drive.items.values()].filter((x) => x.kind === "file" && /^Groovy Employees Data \d{4}-\d{2}$/.test(x.name) && !x.trashed).length === 1);
+// and the app is ready to be used for real
+const first = ok(call("saveEmployee", emp({ emp_no: 3, name: "Asha Khan", email: "asha@example.com" }), TA), "add an employee after the reset");
+check("ids start again", first.id === 1, first.id);
+const fresh = ok(call("saveSlip", { employee_id: first.id, month: "2026-09" }, TA), "a slip after the reset");
+d = ok(call("finalizeSlip", { id: fresh.slip.id }, TA), "finalize after the reset");
+check("a fresh Salary_Slips folder is made", live("Salary_Slips").length === 1 && pathOf(env.drive.items.get(/\/d\/([^/]+)/.exec(d.slip.pdf_url)[1])) === "My Drive/GBG/Groovy Employees/Salary_Slips/FY 2026-27/09/3-Asha-2026-09.pdf");
+// if the copy can't be made, nothing is cleared
+run("DriveApp.__getFileById = DriveApp.getFileById; DriveApp.getFileById = () => { throw new Error('Drive is down'); }");
+let threw = false;
+try {
+    run("resetAllData_()");
+} catch (e) {
+    threw = /Drive is down/.test(e.message);
+}
+run("DriveApp.getFileById = DriveApp.__getFileById");
+check("no backup, no reset", threw && count("Employees") === 1 && count("Salary_Slips") === 1);
+
+// the menu item itself: it only runs when RESET is typed and OK is pressed
+const answer = (text, button) =>
+    run(`SpreadsheetApp.getUi = () => ({ ButtonSet: { OK_CANCEL: 1 }, Button: { OK: "ok", CANCEL: "cancel" }, prompt: (title, msg) => ((__asked = title + "\\n" + msg), { getSelectedButton: () => "${button}", getResponseText: () => "${text}" }) })`);
+run("var __asked = ''");
+answer("reset", "ok"); // not in capitals
+ctx.resetAllData();
+check("the wrong word changes nothing", env.alerts.pop() === "Nothing was changed." && count("Employees") === 1);
+answer("RESET", "cancel");
+ctx.resetAllData();
+check("Cancel changes nothing", env.alerts.pop() === "Nothing was changed." && count("Employees") === 1);
+check("the box says what goes and what stays", /every employee, every salary slip/.test(run("__asked")) && /Kept: the admin logins/.test(run("__asked")) && /saved in Back_up first/.test(run("__asked")), run("__asked"));
+answer(" RESET ", "ok");
+ctx.resetAllData();
+const done = env.alerts.pop();
+check("RESET + OK clears, and says what happened", count("Employees") === 0 && /All data cleared\./.test(done) && /Employees: 1/.test(done) && /Slip PDFs moved to Drive's bin: 1\./.test(done) && /Back_up\/[\d -]+ before reset/.test(done), done);
+
+// every item in the sheet's menu points at a function that exists
+const menu = [];
+run(`SpreadsheetApp.getUi = () => { const m = { addItem: (label, fn) => (__menu.push([label, fn]), m), addSeparator: () => m, addToUi: () => m }; return { createMenu: () => m }; }`);
+Object.assign(ctx, { __menu: menu });
+ctx.onOpen();
+check("menu has the reset item", menu.some(([label, fn]) => /^3\. Reset all data/.test(label) && fn === "resetAllData"), menu);
+check("every menu item runs a real function", menu.length === 8 && menu.every(([, fn]) => typeof ctx[fn] === "function"), menu);
+run(`SpreadsheetApp.getUi = () => { throw new Error("no UI in tests"); }`);
+
 /* ================= demo data loads on a fresh sheet ================= */
 {
     const demo = createEnv();
