@@ -22,11 +22,16 @@ export default function Employees() {
 
   const shown = useMemo(() => {
     const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    return (list || []).filter((e) => {
-      if (show !== "all" && (e.status === "left") !== (show === "left")) return false;
-      const hay = `${e.name} ${e.designation} ${e.location} ${e.phone} emp no ${e.emp_no}`.toLowerCase();
-      return words.every((w) => hay.includes(w));
-    });
+    const left = (e) => (e.status === "left" ? 1 : 0);
+    return (list || [])
+      .filter((e) => {
+        if (show !== "all" && (e.status === "left") !== (show === "left")) return false;
+        const hay = `${e.name} ${e.designation} ${e.location} ${e.phone} emp no ${e.emp_no}`.toLowerCase();
+        return words.every((w) => hay.includes(w));
+      })
+      // by Emp No., lowest first (as numbers: 10 comes after 9); on the All tab, those who have left
+      // come after those still here. filter() gave us a copy, so sorting it leaves the fetched list alone.
+      .sort((a, b) => left(a) - left(b) || Number(a.emp_no) - Number(b.emp_no) || String(a.name).localeCompare(String(b.name)));
   }, [list, q, show]);
 
   return (
