@@ -33,6 +33,100 @@ function eligibleFor_(e, month) {
     return true;
 }
 
+// how many days the month has: "2026-02" → 28
+function daysInMonth_(ym) {
+    return new Date(Date.UTC(parseInt(String(ym).slice(0, 4), 10), parseInt(String(ym).slice(5, 7), 10), 0)).getUTCDate();
+}
+
+/* ---------- days off: four kinds, typed as counts or marked on dates ---------- */
+
+const OFF_KEYS_ = ["paid_off", "paid_half", "unpaid_off", "unpaid_half"];
+// what a date of the slip's month can be marked as
+const DAY_MARKS_ = ["paid", "paid_half", "unpaid", "unpaid_half", "event"];
+
+// 2.5 → { full: 2, half: 1 }
+function splitHalf_(x) {
+    const full = Math.floor(x + 1e-9);
+    return { full, half: x - full > 1e-9 ? 1 : 0 };
+}
+
+// a total of days off (how slips were kept before there were four kinds) → the four counts, the paid
+// holidays used first
+function offFromTotal_(total, paidHolidays) {
+    const paid = Math.min(total, paidHolidays);
+    const p = splitHalf_(paid);
+    const u = splitHalf_(r2_(total - paid));
+    return { paid_off: p.full, paid_half: p.half, unpaid_off: u.full, unpaid_half: u.half };
+}
+
+/** A slip's four counts. One saved before there were four kinds has only its totals: they are split here. */
+function offCounts_(s) {
+    const c = {};
+    OFF_KEYS_.forEach((k) => (c[k] = num_(s[k])));
+    if (r2_(c.paid_off + c.unpaid_off + (c.paid_half + c.unpaid_half) / 2) === num_(s.days_off)) return c;
+    const unpaid = num_(s.unpaid_days);
+    const p = splitHalf_(Math.max(0, r2_(num_(s.days_off) - unpaid)));
+    const u = splitHalf_(unpaid);
+    return { paid_off: p.full, paid_half: p.half, unpaid_off: u.full, unpaid_half: u.half };
+}
+
+/**
+ * The dates marked on a slip, checked: a day of that month they were employed (`span`, when known),
+ * marked as one of DAY_MARKS_. Someone paid per event day has no days off, so only their event days
+ * are kept. Anything else is dropped.
+ */
+function cleanMarks_(marks, month, payType, span) {
+    const out = {};
+    if (!marks || typeof marks !== "object" || Array.isArray(marks)) return out;
+    const first = span ? span.from : 1;
+    const last = span ? span.to : daysInMonth_(month);
+    Object.keys(marks).forEach((k) => {
+        const d = Number(k);
+        const v = marks[k];
+        if (!(d >= first && d <= last && Math.floor(d) === d)) return;
+        if (payType === "event" ? v !== "event" : DAY_MARKS_.indexOf(v) < 0) return;
+        out[String(d)] = v;
+    });
+    return out;
+}
+
+// what the marked dates come to: the four counts, the event days, and how many dates are days off
+function countsFromMarks_(marks) {
+    const c = { paid_off: 0, paid_half: 0, unpaid_off: 0, unpaid_half: 0, event: 0 };
+    const key = { paid: "paid_off", paid_half: "paid_half", unpaid: "unpaid_off", unpaid_half: "unpaid_half", event: "event" };
+    Object.keys(marks || {}).forEach((d) => {
+        if (key[marks[d]]) c[key[marks[d]]]++;
+    });
+    c.off = c.paid_off + c.paid_half + c.unpaid_off + c.unpaid_half;
+    return c;
+}
+
+// typed counts, checked: whole numbers, 0 to 31 (a half day is counted as one half day)
+function cleanOffCounts_(o) {
+    const out = {};
+    OFF_KEYS_.forEach((k) => {
+        const v = o[k] === undefined || o[k] === null || o[k] === "" ? 0 : Number(o[k]);
+        if (isNaN(v) || v < 0 || v > 31 || Math.floor(v) !== v) fail_("Days off are counted in whole days and half days, 0 to 31");
+        out[k] = v;
+    });
+    return out;
+}
+
+/**
+ * The rules for the four counts: paid days off can't be more than the paid holidays, and the paid
+ * holidays are used first — a whole day can't be unpaid while a whole paid holiday is left, nor a half
+ * day while half of one is left. (With half a holiday left a whole unpaid day is fine: the half is
+ * paid extra, which comes to what 1½ days off against one paid holiday always came to.)
+ */
+function checkOff_(c, paidHolidays) {
+    const used = r2_(c.paid_off + c.paid_half / 2);
+    if (r2_(used + c.unpaid_off + c.unpaid_half / 2) > 31) fail_("Days off can't be more than 31");
+    if (used > paidHolidays)
+        fail_(paidHolidays ? "Paid days off can't be more than the " + paidHolidays + " paid holiday" + (paidHolidays === 1 ? "" : "s") : "There are no paid holidays this month, so days off are unpaid");
+    const left = r2_(paidHolidays - used);
+    if ((c.unpaid_off > 0 && left >= 1) || (c.unpaid_half > 0 && left >= 0.5)) fail_("Use the paid holidays first: " + daysLabel_(left) + " left");
+}
+
 /* ---------- the maths (pure: no sheet, no settings) ---------- */
 
 // an amount typed over the worked-out one; blank means "use the worked-out one"
@@ -46,8 +140,10 @@ function amountOr_(v, auto) {
 /**
  * Everything a slip's figures come from.
  *
- * One day's salary is base ÷ salaryDays. The employee has `paidHolidays` paid days off in the month:
- * days off beyond those are unpaid leave (a deduction), and a holiday not taken is paid as extra days
+ * One day's salary is base ÷ salaryDays. The employee has `paidHolidays` paid days off in the month.
+ * `off` says which days off were paid and which not: { paid_off, paid_half, unpaid_off, unpaid_half }
+ * (see checkOff_ for the rules), or — as slips were kept before — just a total, the paid holidays then
+ * used first. Unpaid days are unpaid leave (a deduction); paid holidays not used are paid as extra days
  * (an earning). Both of those lines are written here, from the days off; `over` carries an amount the
  * admin typed over either of them. `manual` are the lines the admin added.
  *
@@ -56,28 +152,37 @@ function amountOr_(v, auto) {
  * paid only that way: they have no base, so there is no day's salary and the holiday rule has nothing
  * to work on; their slip carries no days off and neither of those two lines.
  */
-function computeSlip_(base, salaryDays, paidHolidays, daysOff, manual, over, ev) {
+function computeSlip_(base, salaryDays, paidHolidays, off, manual, over, ev) {
     over = over || {};
     ev = ev || {};
     const eventPaid = ev.type === "event";
     base = eventPaid ? 0 : r2_(num_(base));
     salaryDays = num_(salaryDays);
     paidHolidays = eventPaid ? 0 : num_(paidHolidays);
-    daysOff = eventPaid ? 0 : parseFloat(daysOff);
     const blank = (v) => v === undefined || v === null || v === "";
     const eventDays = blank(ev.days) ? 0 : parseFloat(ev.days);
     const eventRate = blank(ev.rate) ? 0 : r2_(parseFloat(ev.rate));
     if (!(base >= 0)) fail_("Base salary must be 0 or more");
     if (!eventPaid && !(salaryDays >= 1)) fail_("Days in a salary month must be 1 or more");
-    if (isNaN(daysOff) || daysOff < 0 || daysOff > 31) fail_("Days off must be between 0 and 31");
-    if (!isHalfStep_(daysOff)) fail_("Days off must be in whole or half days");
+    let counts;
+    if (eventPaid) counts = { paid_off: 0, paid_half: 0, unpaid_off: 0, unpaid_half: 0 };
+    else if (off !== null && typeof off === "object") counts = cleanOffCounts_(off);
+    else {
+        const total = parseFloat(off);
+        if (isNaN(total) || total < 0 || total > 31) fail_("Days off must be between 0 and 31");
+        if (!isHalfStep_(total)) fail_("Days off must be in whole or half days");
+        counts = offFromTotal_(total, paidHolidays);
+    }
+    checkOff_(counts, paidHolidays);
     if (isNaN(eventDays) || eventDays < 0 || eventDays > 31) fail_("Event days must be between 0 and 31");
     if (!isHalfStep_(eventDays)) fail_("Event days must be in whole or half days");
     if (!(eventRate >= 0)) fail_("The rate for an event day must be 0 or more");
 
     const perDay = eventPaid ? 0 : base / salaryDays;
-    const unpaid = Math.max(0, r2_(daysOff - paidHolidays));
-    const unused = Math.max(0, r2_(paidHolidays - daysOff));
+    const paidUsed = r2_(counts.paid_off + counts.paid_half / 2);
+    const unpaid = r2_(counts.unpaid_off + counts.unpaid_half / 2);
+    const daysOff = r2_(paidUsed + unpaid);
+    const unused = r2_(paidHolidays - paidUsed);
     const leaveAuto = Math.round(perDay * unpaid);
     const holidayAuto = Math.round(perDay * unused);
     const eventAuto = r2_(eventDays * eventRate);
@@ -98,6 +203,7 @@ function computeSlip_(base, salaryDays, paidHolidays, daysOff, manual, over, ev)
     const deductionsTotal = sum(deductions);
     return {
         base_salary: base, days_off: daysOff, unpaid_days: unpaid, unused_days: unused,
+        paid_off: counts.paid_off, paid_half: counts.paid_half, unpaid_off: counts.unpaid_off, unpaid_half: counts.unpaid_half,
         per_day: r2_(perDay), leave_auto: leaveAuto, holiday_auto: holidayAuto,
         pay_type: eventPaid ? "event" : "monthly", event_days: eventDays, event_rate: eventRate, event_auto: eventAuto,
         items: earnings.concat(deductions).map((l, i) => Object.assign(l, { sort: i + 1 })),
@@ -110,6 +216,12 @@ function computeSlip_(base, salaryDays, paidHolidays, daysOff, manual, over, ev)
 // before there was a choice, is "monthly"
 function payTypeOf_(row) {
     return row && row.pay_type === "event" ? "event" : "monthly";
+}
+
+// paid holidays a month for an employee: their own number if their profile has one, else the one in Settings
+function paidHolidaysFor_(e) {
+    const own = str_(e && e.paid_holidays);
+    return own !== "" ? num_(own, 0) : num_(setting_("paid_holidays"), 1);
 }
 
 /** The lines an admin added, checked. The lines the app writes itself are never taken from the app. */
@@ -146,15 +258,31 @@ function slipOut_(s) {
     return o;
 }
 
+/**
+ * Number of days, worked days and paid days: the days employed that month; less the days off (for
+ * someone paid per event day, their event days); less the unpaid days. Blank for a slip from before
+ * slips kept their days.
+ */
+function slipDays_(s) {
+    const span = slipSpan_(s);
+    if (!span) return { month_days: "", worked_days: "", paid_days: "" };
+    const event = payTypeOf_(s) === "event";
+    return {
+        month_days: span.days,
+        worked_days: event ? s.event_days || 0 : r2_(span.days - s.days_off),
+        paid_days: event ? "" : r2_(span.days - s.unpaid_days),
+    };
+}
+
 // what a list needs: no lines, no text
 function slipBrief_(s) {
-    return {
+    return Object.assign(slipDays_(s), {
         id: s.id, month: s.month, month_label: monthLabel_(s.month), employee_id: s.employee_id, status: s.status,
         base_salary: s.base_salary, earnings_total: s.earnings_total, deductions_total: s.deductions_total,
         net_salary: s.net_salary, days_off: s.days_off, unpaid_days: s.unpaid_days,
         pay_type: payTypeOf_(s), event_days: s.event_days || 0,
         emailed_at: s.emailed_at, emailed_to: s.emailed_to, pdf_url: s.pdf_url,
-    };
+    });
 }
 
 /** A slip with its lines, its text, and what the editor needs to work the app's own lines out live. */
@@ -162,14 +290,17 @@ function slipDetail_(s) {
     const items = itemsOf_(s.id);
     const e = findBy_("Employees", "id", s.employee_id);
     const perDay = s.base_salary / (s.salary_days || 30);
+    const off = offCounts_(s);
+    const paidUsed = r2_(off.paid_off + off.paid_half / 2);
     return {
-        slip: Object.assign(slipOut_(s), { pay_type: payTypeOf_(s), event_days: s.event_days || 0, event_rate: s.event_rate || 0 }),
+        slip: Object.assign(slipOut_(s), { pay_type: payTypeOf_(s), event_days: s.event_days || 0, event_rate: s.event_rate || 0, day_marks: s.day_marks || {} }, off, slipDays_(s)),
         items: items.map((i) => ({ kind: i.kind, category: i.category, label: i.label, qty: i.qty, amount: i.amount, auto: i.auto ? 1 : 0 })),
         text: slipText_(s, items),
-        employee: e ? { id: e.id, name: e.name, email: e.email, phone: e.phone, status: e.status } : null,
+        // base_salary: their full monthly base, for the part-month suggestion on a joiner's or leaver's draft
+        employee: e ? { id: e.id, name: e.name, email: e.email, phone: e.phone, status: e.status, base_salary: e.base_salary } : null,
         auto: {
             leave_amount: Math.round(perDay * s.unpaid_days),
-            holiday_amount: Math.round(perDay * Math.max(0, r2_(s.paid_holidays - s.days_off))),
+            holiday_amount: Math.round(perDay * Math.max(0, r2_(s.paid_holidays - paidUsed))),
             event_amount: r2_((s.event_days || 0) * (s.event_rate || 0)),
         },
     };
@@ -236,6 +367,34 @@ function apiListMonth_(p, ctx) {
 
 /* ---------- writing ---------- */
 
+/**
+ * The days of the month someone was employed: from the day they joined, if that was this month, to
+ * their last working day, if that was this month; otherwise the whole month. { from, to, days }
+ */
+function employedSpan_(e, month) {
+    const doj = String(e.doj || "");
+    const dol = e.status === "left" ? String(e.dol || "") : "";
+    const from = doj.slice(0, 7) === month ? Number(doj.slice(8, 10)) : 1;
+    const to = dol.slice(0, 7) === month ? Number(dol.slice(8, 10)) : daysInMonth_(month);
+    return { from, to, days: Math.max(0, to - from + 1) };
+}
+
+// the days a slip covers, as stamped on it — null for a slip from before slips kept them
+function slipSpan_(s) {
+    const to = num_(s.to_day);
+    if (!(to > 0)) return null;
+    const from = num_(s.from_day) || 1;
+    return { from, to, days: Math.max(0, to - from + 1) };
+}
+
+// the days off and the event days have to fit in the days employed
+function checkSpan_(s) {
+    const span = slipSpan_(s);
+    if (!span) return;
+    if (s.days_off > span.days) fail_("Days off can't be more than the number of days (" + span.days + ")");
+    if ((s.event_days || 0) > span.days) fail_("Event days can't be more than the number of days (" + span.days + ")");
+}
+
 // the employee as they are now, copied onto the slip
 function stampEmployee_(s, e) {
     s.emp_no = e.emp_no;
@@ -243,6 +402,9 @@ function stampEmployee_(s, e) {
     s.designation = e.designation;
     s.location = e.location;
     s.doj = e.doj;
+    const span = employedSpan_(e, s.month);
+    s.from_day = span.from;
+    s.to_day = span.to;
 }
 
 function assertCanHaveSlip_(e, month) {
@@ -256,16 +418,20 @@ function blankSlip_(e, month, ctx, id) {
     const now = nowStr_();
     const type = payTypeOf_(e);
     // someone paid per event day has no base, so no holiday rule: their slip carries no days off at all
-    const holidays = type === "event" ? 0 : num_(setting_("paid_holidays"), 1);
+    const holidays = type === "event" ? 0 : paidHolidaysFor_(e);
+    // a new slip assumes the holiday was taken — but not more days than they were employed that month
+    const assumed = Math.min(holidays, employedSpan_(e, month).days);
+    const taken = splitHalf_(assumed);
     const s = {
         id, month, employee_id: e.id, base_salary: type === "event" ? 0 : e.base_salary,
         salary_days: num_(setting_("salary_days"), 30), paid_holidays: holidays,
-        // a new slip assumes the holiday was taken: nothing is added or taken off until the admin says otherwise
-        days_off: holidays, unpaid_days: 0,
+        // nothing is added or taken off until the admin says otherwise
+        days_off: assumed, unpaid_days: 0,
         earnings_total: 0, deductions_total: 0, net_salary: 0, status: "draft", notes: "", pdf_url: "",
         emailed_at: "", emailed_to: "", created_by: ctx.user.id, created_at: now, updated_at: now, finalized_at: "",
         // the slip keeps the pay type it was made with; the rate starts as the employee's and can be changed here
         pay_type: type, event_days: 0, event_rate: num_(e.day_rate),
+        paid_off: taken.full, paid_half: taken.half, unpaid_off: 0, unpaid_half: 0, day_marks: null,
     };
     stampEmployee_(s, e);
     return s;
@@ -275,6 +441,7 @@ function applyFigures_(s, c) {
     s.base_salary = c.base_salary;
     s.days_off = c.days_off;
     s.unpaid_days = c.unpaid_days;
+    OFF_KEYS_.forEach((k) => (s[k] = c[k]));
     s.event_days = c.event_days;
     s.event_rate = c.event_rate;
     s.earnings_total = c.earnings_total;
@@ -297,9 +464,11 @@ function writeItems_(slipId, items) {
 
 /**
  * Create a draft, or save changes to one.
- * payload: { id } or { employee_id, month }, plus any of base_salary, days_off, event_days, event_rate,
- * items (the added lines), leave_amount / holiday_amount / event_amount (typed over the worked-out
- * ones; blank = worked out), notes.
+ * payload: { id } or { employee_id, month }, plus any of base_salary, the days off (paid_off,
+ * paid_half, unpaid_off, unpaid_half — or days_off, a total, from an app before there were four
+ * kinds), day_marks (the dates; when there are any, the days off and event days are counted from them
+ * and the counts sent are ignored), event_days, event_rate, items (the added lines), leave_amount /
+ * holiday_amount / event_amount (typed over the worked-out ones; blank = worked out), notes.
  */
 function apiSaveSlip_(p, ctx) {
     return withLock_(() => {
@@ -325,18 +494,31 @@ function apiSaveSlip_(p, ctx) {
             p.items !== undefined ? cleanItems_(p.items)
                 : isNew ? cleanRecurring_(e.recurring).map((l) => Object.assign({ qty: 0 }, l))
                     : itemsOf_(s.id).filter((i) => !i.auto);
+        const given = (v) => v !== undefined && v !== null && v !== "";
+        // the dates, when marked, decide the days off and the event days
+        const marks = cleanMarks_(p.day_marks !== undefined ? p.day_marks : s.day_marks, s.month, payTypeOf_(s), slipSpan_(s));
+        const fromMarks = countsFromMarks_(marks);
+        let off;
+        if (fromMarks.off > 0) off = fromMarks;
+        else if (OFF_KEYS_.some((k) => given(p[k]))) {
+            const now = offCounts_(s);
+            off = {};
+            OFF_KEYS_.forEach((k) => (off[k] = given(p[k]) ? p[k] : now[k]));
+        } else if (given(p.days_off)) off = p.days_off;
+        else off = offCounts_(s);
         const c = computeSlip_(
             p.base_salary === undefined ? s.base_salary : p.base_salary,
-            s.salary_days, s.paid_holidays,
-            p.days_off === undefined || p.days_off === "" ? s.days_off : p.days_off,
+            s.salary_days, s.paid_holidays, off,
             manual, { leave_amount: p.leave_amount, holiday_amount: p.holiday_amount, event_amount: p.event_amount },
             {
                 type: payTypeOf_(s),
-                days: p.event_days === undefined || p.event_days === "" ? s.event_days : p.event_days,
+                days: fromMarks.event > 0 ? fromMarks.event : given(p.event_days) ? p.event_days : s.event_days,
                 rate: p.event_rate === undefined || p.event_rate === "" ? s.event_rate : p.event_rate,
             },
         );
         applyFigures_(s, c);
+        checkSpan_(s);
+        s.day_marks = Object.keys(marks).length ? marks : null;
         if (p.notes !== undefined) s.notes = str_(p.notes).slice(0, 300);
         s.updated_at = nowStr_();
         if (isNew) appendRows_("Salary_Slips", [s]);
@@ -369,7 +551,7 @@ function apiPrepareMonth_(p, ctx) {
         let items = [];
         todo.forEach((e) => {
             const s = blankSlip_(e, month, ctx, slipId++);
-            const c = computeSlip_(s.base_salary, s.salary_days, s.paid_holidays, s.days_off, cleanRecurring_(e.recurring).map((l) => Object.assign({ qty: 0 }, l)), {}, { type: s.pay_type, days: 0, rate: s.event_rate });
+            const c = computeSlip_(s.base_salary, s.salary_days, s.paid_holidays, offCounts_(s), cleanRecurring_(e.recurring).map((l) => Object.assign({ qty: 0 }, l)), {}, { type: s.pay_type, days: 0, rate: s.event_rate });
             applyFigures_(s, c);
             slips.push(s);
             const rows = itemRows_(s.id, c.items, itemId);
@@ -401,6 +583,7 @@ function apiFinalizeSlip_(p, ctx) {
         if (!(s.base_salary > 0) && !(s.earnings_total > 0)) fail_("Nothing to pay on this slip. Enter the event days, or delete the draft.");
         const e = findBy_("Employees", "id", s.employee_id);
         if (e) stampEmployee_(s, e);
+        checkSpan_(s); // their dates may have changed since the draft was saved
         const now = nowStr_();
         s.status = "final";
         s.finalized_at = now;

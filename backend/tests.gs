@@ -98,6 +98,28 @@ function runTests() {
     eq("event line label, amount typed over", lineLabel_({ auto: 1, category: "Event pay", label: "Event pay", qty: 5, amount: 3500 }, { event_rate: 800 }, "₹"), "Event pay (5 days)");
     eq("pay type of an old row", [payTypeOf_({ pay_type: "" }), payTypeOf_({}), payTypeOf_({ pay_type: "event" })], ["monthly", "monthly", "event"]);
 
+    // days off by kind: { paid_off, paid_half, unpaid_off, unpaid_half }
+    const off = (po, ph, uo, uh) => ({ paid_off: po, paid_half: ph, unpaid_off: uo, unpaid_half: uh });
+    c = computeSlip_(15000, 30, 1, off(1, 0, 2, 0), [], {});
+    eq("1 paid + 2 unpaid", [c.days_off, c.unpaid_days, line(c, "Unpaid leave").amount, line(c, "Holiday not taken"), c.net_salary], [3, 2, 1000, null, 14000]);
+    c = computeSlip_(15000, 30, 1, off(0, 2, 0, 0), [], {});
+    eq("2 paid half days use up 1 paid holiday", [c.days_off, c.items.length, c.net_salary], [1, 0, 15000]);
+    c = computeSlip_(15000, 30, 2, off(2, 0, 0, 1), [], {});
+    eq("2 paid + an unpaid half day", [c.days_off, c.unpaid_days, c.unused_days, line(c, "Unpaid leave").amount], [2.5, 0.5, 0, 250]);
+    c = computeSlip_(15000, 30, 1, off(0, 1, 1, 0), [], {});
+    eq("half a holiday left beside a whole unpaid day", [c.unpaid_days, c.unused_days, c.net_salary], [1, 0.5, 14750]);
+    eq("as much as 1.5 days off always came to", c.net_salary, computeSlip_(15000, 30, 1, 1.5, [], {}).net_salary);
+    eq("the total is split, paid first", [computeSlip_(15000, 30, 1, 2.5, [], {})].map((x) => [x.paid_off, x.paid_half, x.unpaid_off, x.unpaid_half])[0], [1, 0, 1, 1]);
+    throws("paid over the paid holidays", () => computeSlip_(15000, 30, 1, off(2, 0, 0, 0), [], {}));
+    throws("paid half days over the paid holidays", () => computeSlip_(15000, 30, 1, off(1, 1, 0, 0), [], {}));
+    throws("unpaid while a paid holiday is left", () => computeSlip_(15000, 30, 1, off(0, 0, 1, 0), [], {}));
+    throws("unpaid half day while half a holiday is left", () => computeSlip_(15000, 30, 1, off(0, 1, 0, 1), [], {}));
+    throws("counts are whole numbers", () => computeSlip_(15000, 30, 1, off(1, 0, 1.5, 0), [], {}));
+    eq("event pay: no days off whatever is sent", computeSlip_(0, 30, 1, off(1, 0, 3, 0), [], {}, { type: "event", days: 2, rate: 800 }).days_off, 0);
+    eq("ordinals", [1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 31].map(ordinal_), ["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "23rd", "31st"]);
+    eq("marks outside the month dropped", cleanMarks_({ 0: "paid", 29: "paid", 30: "unpaid", 2: "nap", 3: "event" }, "2026-02", "monthly"), { 3: "event" });
+    eq("only event days for someone paid per event day", cleanMarks_({ 2: "paid", 5: "event" }, "2026-09", "event"), { 5: "event" });
+
     // money and words
     eq("money", money_(1234567, "₹"), "₹12,34,567");
     eq("money with paise", money_(1250.5, "₹"), "₹1,250.50");

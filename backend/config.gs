@@ -65,6 +65,10 @@ const SCHEMA = {
         // event days they work, no base). New columns go at the end so Setup can add them to a live sheet.
         pay_type: "s",
         day_rate: "n", // what one event day pays; the starting rate on their slips
+        alt_phone: "s", // a second number to reach them on
+        // their own paid holidays a month, e.g. "2". Text, not a number, so that blank — use the number in
+        // Settings — stays apart from "0" (no paid holidays at all).
+        paid_holidays: "s",
     },
     Salary_Slips: {
         id: "n",
@@ -96,6 +100,20 @@ const SCHEMA = {
         pay_type: "s", // as the employee was paid when the slip was made: monthly | event
         event_days: "n", // event days worked that month (monthly staff can have these too)
         event_rate: "n", // what one of those days paid
+        // the days off, by kind. days_off and unpaid_days above stay as their totals:
+        // days_off = paid_off + paid_half/2 + unpaid_off + unpaid_half/2, unpaid_days = unpaid_off + unpaid_half/2
+        paid_off: "n", // whole days off, paid
+        paid_half: "n", // half days off, paid (each is half a paid holiday)
+        unpaid_off: "n",
+        unpaid_half: "n",
+        // the dates they were taken, when the admin marked them, and the event days worked:
+        // {"2":"paid","9":"paid_half","3":"unpaid","4":"unpaid_half","5":"event"}
+        day_marks: "j",
+        // the days of the month they were employed: 1 to the month's last day, or from the day they
+        // joined / to their last working day. Number of days = to_day − from_day + 1. Kept on the slip so
+        // a final slip never changes; 0 on a slip from before there was this.
+        from_day: "n",
+        to_day: "n",
     },
     Slip_Items: {
         id: "n",

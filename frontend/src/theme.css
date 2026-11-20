@@ -390,3 +390,49 @@ a.btn { text-decoration: none; }
 .topbar .title-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
 .topbar .title-wrap h1 { flex: none; line-height: 1.15; }
 .topbar .title-wrap .sub { color: var(--gold); font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* the slip's month as a calendar: days off and event days by date */
+.cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal .wd { text-align: center; font-size: 11px; font-weight: 700; color: var(--muted); padding: 2px 0 4px; }
+.cal .day {
+  aspect-ratio: 1; min-height: 40px; padding: 0; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font: inherit; font-size: 14px; font-weight: 600;
+}
+.cal .day .mk { font-size: 10px; font-weight: 800; line-height: 1; }
+.cal .day.sel { outline: 2px solid var(--brown); outline-offset: 1px; }
+.cal .paid, .sw.paid { background: var(--ok-soft); color: var(--ok); border-color: #b9dcbb; }
+.cal .unpaid, .sw.unpaid { background: var(--bad-soft); color: var(--bad); border-color: #f2c1bc; }
+.cal .event, .sw.event { background: var(--gold-soft); color: var(--brown-dark); border-color: var(--gold); }
+.cal .half, .sw.half { border-style: dashed; border-color: currentColor; }
+.sw {
+  display: inline-grid; place-items: center; flex: none; width: 34px; height: 26px; border-radius: 6px;
+  border: 1px solid var(--line); font-size: 11.5px; font-weight: 800; vertical-align: middle;
+}
+.cal-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 12px; font-size: 12.5px; color: var(--charcoal); }
+.cal-legend .sw { width: 28px; height: 22px; font-size: 10.5px; }
+.cal-pick { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); }
+.cal-opt {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 46px; margin-top: 6px; padding: 6px 10px;
+  border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); font: inherit; font-weight: 600; text-align: left; cursor: pointer;
+}
+.cal-opt.on { border-color: var(--brown); box-shadow: inset 0 0 0 1px var(--brown); }
+.cal-opt:disabled { opacity: .55; cursor: not-allowed; }
+.cal-opt small { display: block; font-size: 11.5px; font-weight: 500; color: var(--muted); }
+
+/* the four kinds of day off on a slip, typed as totals */
+.stepper-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.stepper-row .icon-btn:disabled { cursor: not-allowed; }
+.link-btn { border: 0; background: none; padding: 4px 0; color: var(--brown); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+
+/* dates before they joined or after their last working day */
+.cal .day:disabled { background: var(--cream); border-color: transparent; color: var(--muted); opacity: .5; cursor: default; }
+.sw.out { background: var(--cream); border-color: transparent; opacity: .6; }
+
+/* the slip's days, as it prints them: Number of days · Worked days · Paid days */
+.days-sum { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 9px 12px; margin-top: 4px; border-radius: var(--r-sm); background: var(--bg); color: var(--charcoal); }
+.days-sum b { color: var(--ink); }
+/* joined or left during the month: the part-month base, offered */
+.part-month { margin: -4px 0 12px; padding: 9px 12px; border-radius: var(--r-sm); background: var(--warn-soft); color: var(--charcoal); }
+.part-month .link-btn { padding: 0 2px; }
+.days-sum.bad-text { color: var(--bad); }

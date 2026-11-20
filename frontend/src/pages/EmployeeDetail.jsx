@@ -54,6 +54,7 @@ export default function EmployeeDetail({ id }) {
     e.status === "left" && ["Left", e.dol ? fmtDate(e.dol) : "Yes"],
     e.dob && ["Born", fmtDate(e.dob)],
     e.phone && ["Mobile", e.phone],
+    e.alt_phone && ["Alt. mobile", <a href={`tel:${e.alt_phone}`}>{e.alt_phone}</a>],
     e.email && ["Email", e.email],
     e.address && ["Address", e.address],
     e.notes && ["Notes", e.notes],
@@ -135,6 +136,10 @@ export default function EmployeeDetail({ id }) {
               <div className="kv">
                 <span className="k">Base salary, per month</span>
                 <b className="money">{inr(e.base_salary)}</b>
+              </div>
+              <div className="kv small">
+                <span className="k">Paid holidays a month</span>
+                <span>{e.paid_holidays !== "" && e.paid_holidays != null ? e.paid_holidays : `${Number(settings.paid_holidays) || 0} (usual)`}</span>
               </div>
               {e.day_rate > 0 && (
                 <div className="kv small">

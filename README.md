@@ -21,15 +21,39 @@ Net salary = Base salary + Earnings − Deductions
 ```
 
 - **One day's salary** is the base ÷ 30, every month alike.
-- **One paid holiday a month.** On each slip you enter the days off the person took:
-    - 1 day off: nothing is added or deducted.
-    - More than 1: the days beyond the first are unpaid leave and are deducted. 3 days off on ₹15,000 is 2 unpaid days, ₹1,000.
+- **One paid holiday a month.** On each slip you enter the days off the person took, in four kinds: **paid days off**, **paid half days**, **unpaid days off** and **unpaid half days**.
+    - 1 paid day off: nothing is added or deducted.
+    - 1 paid + 2 unpaid: the 2 unpaid days are deducted. On ₹15,000 that is ₹1,000.
     - 0 days off: the holiday not taken is paid as an extra day, ₹500 on ₹15,000.
-    - Half days work too (1.5 days off is half a day unpaid).
+    - A half day is half a day. 2 paid half days use up the 1 paid holiday.
+    - Paid days off can't be more than the paid holidays, and paid holidays are used first: a day can't be marked unpaid while a paid holiday is left.
+- **Pick dates.** Instead of typing the totals, tap **Pick dates** and mark each date on the month's calendar: paid or unpaid day off, paid or unpaid half day, or event day. The totals and the event days are then counted from the dates, and the slip lists them:
+    ```
+    Days off       : 4 (1 paid holiday, 3 unpaid)
+    Paid off       : 2nd
+    Unpaid off     : 3rd, 25th
+    Unpaid ½ off   : 4th, 27th
+    Event days     : 5th, 12th
+    ```
+- **Days on the slip.** Every slip shows the month's days:
+    ```
+    Number of days : 30
+    Worked days    : 26
+    Days off       : 4 (1 paid holiday, 3 unpaid)
+    Paid off       : 2nd
+    Unpaid off     : 3rd, 25th
+    Unpaid ½ off   : 4th, 27th
+    Paid days      : 27 (30 - 3 unpaid)
+    ```
+    - **Number of days** is the real number of days in the month (28 to 31). One day's salary is still the base ÷ 30.
+    - **Worked days** = number of days − all days off (a half day counts half). **Paid days** = number of days − unpaid days.
+    - For someone paid per event day, worked days are their event days.
+    - **Joined or left during the month:** only the days employed count, e.g. `Number of days : 21 (from 10th)`. The slip page suggests the base for those days (₹15,000 ÷ 30 × 21 = ₹10,500); tap **Use it** to take it. The calendar greys out the days before joining or after leaving.
 - **Earnings** you add: overtime, commission, allowance, bonus. **Deductions** you add: advance, penalty.
 - **Event days.** Anyone can be paid for days worked at events: enter the days on the slip and the app adds `Event pay (5 days × ₹800)`. The rate starts as the one on their profile and can be changed on the slip.
 - The app fills in the unpaid-leave and holiday amounts for you. You can type over either one.
 - The 30 and the 1 are settings (**More → Settings → Salary rules**). Changing them affects slips prepared afterwards; existing slips keep the rules they were made with.
+- **Paid holidays per person.** Someone can have a different number from everyone else: fill in **Paid holidays a month** on their profile (for example 2, or 0 for none). Left blank, they get the number in Settings. Like the base salary, a change applies to their slips made afterwards.
 
 ### People paid per event day
 

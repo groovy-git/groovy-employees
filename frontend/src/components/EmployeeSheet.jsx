@@ -6,7 +6,7 @@ import { istDate } from "../lib/format";
 import { Button, DateField, Field, MoneyInput, Seg, Sheet, useConfirm } from "./ui";
 import { LineList } from "./Lines";
 
-export const NEW_EMPLOYEE = { emp_no: "", name: "", designation: "", location: "", dob: "", doj: "", phone: "", email: "", address: "", pay_type: "monthly", base_salary: "", day_rate: "", recurring: [], notes: "" };
+export const NEW_EMPLOYEE = { emp_no: "", name: "", designation: "", location: "", dob: "", doj: "", phone: "", alt_phone: "", email: "", address: "", pay_type: "monthly", base_salary: "", day_rate: "", paid_holidays: "", recurring: [], notes: "" };
 
 // values already used, offered as you type so "Kondhwa" is not also "kondhwa" and "Kondwa"
 function Suggest({ id, values }) {
@@ -36,7 +36,10 @@ export default function EmployeeSheet({ e, all = [], onClose, onSaved }) {
   const base = Number(f.base_salary) || 0;
   // paid a monthly salary, or only for the event days they work (then there is no base to ask for)
   const eventPaid = f.pay_type === "event";
-  const holidays = Number(settings.paid_holidays) || 0;
+  // paid holidays a month: their own number, or the one in Settings when the box is left blank
+  const usualHolidays = Number(settings.paid_holidays) || 0;
+  const ownHolidays = String(f.paid_holidays ?? "").trim();
+  const holidays = ownHolidays !== "" && !isNaN(Number(ownHolidays)) ? Number(ownHolidays) : usualHolidays;
   // the roles from Settings. Someone whose role is no longer on that list (or was typed before there
   // was one) keeps it as a choice of their own, so opening and saving them never changes their role.
   const roles = String(settings.roles || "").split("\n").map((r) => r.trim()).filter(Boolean);
@@ -117,6 +120,18 @@ export default function EmployeeSheet({ e, all = [], onClose, onSaved }) {
           <Field label="Monthly base salary" hint={base > 0 ? `One day's salary: ${inr(Math.round((base / salaryDays) * 100) / 100)} (base ÷ ${salaryDays})` : null}>
             <MoneyInput value={String(f.base_salary || "")} onChange={(v) => setF({ ...f, base_salary: v })} />
           </Field>
+          <Field
+            label="Paid holidays a month"
+            hint={
+              ownHolidays === ""
+                ? `Leave blank to use the usual ${usualHolidays} (More → Settings).`
+                : holidays
+                  ? `Days off beyond ${holidays} are unpaid. A holiday not taken is paid as an extra day.`
+                  : "Every day off is unpaid."
+            }
+          >
+            <input className="input" inputMode="decimal" value={f.paid_holidays ?? ""} placeholder={String(usualHolidays)} onChange={(ev) => setF({ ...f, paid_holidays: ev.target.value.replace(/[^\d.]/g, "") })} />
+          </Field>
           <Field label="Rate per event day (optional)" hint="Only if they also work at events, on top of their salary.">
             <MoneyInput value={String(f.day_rate || "")} onChange={(v) => setF({ ...f, day_rate: v })} />
           </Field>
@@ -128,10 +143,13 @@ export default function EmployeeSheet({ e, all = [], onClose, onSaved }) {
         <Field label="Mobile">
           <input className="input" type="tel" inputMode="tel" value={f.phone || ""} onChange={set("phone")} />
         </Field>
-        <Field label="Date of birth">
-          <DateField value={f.dob} max={istDate(-1)} onChange={set("dob")} aria-label="Date of birth" />
+        <Field label="Alternative number (optional)">
+          <input className="input" type="tel" inputMode="tel" value={f.alt_phone || ""} onChange={set("alt_phone")} />
         </Field>
       </div>
+      <Field label="Date of birth">
+        <DateField value={f.dob} max={istDate(-1)} onChange={set("dob")} aria-label="Date of birth" />
+      </Field>
       <Field label="Email" hint="Salary slips are emailed here">
         <input className="input" type="email" inputMode="email" value={f.email || ""} onChange={set("email")} />
       </Field>

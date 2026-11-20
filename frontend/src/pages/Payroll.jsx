@@ -89,8 +89,11 @@ export default function Payroll({ month: fromRoute }) {
       { label: "Earnings", get: (r) => (r.slip ? r.slip.earnings_total : "") },
       { label: "Deductions", get: (r) => (r.slip ? r.slip.deductions_total : "") },
       { label: "Net salary", get: (r) => (r.slip ? r.slip.net_salary : "") },
+      { label: "Number of days", get: (r) => (r.slip ? r.slip.month_days : "") },
+      { label: "Worked days", get: (r) => (r.slip ? r.slip.worked_days : "") },
       { label: "Days off", get: (r) => (r.slip ? r.slip.days_off : "") },
       { label: "Unpaid days", get: (r) => (r.slip ? r.slip.unpaid_days : "") },
+      { label: "Paid days", get: (r) => (r.slip ? r.slip.paid_days : "") },
       { label: "Status", get: (r) => (!r.slip ? (r.employee.pay_type === "event" ? "No slip" : "Not started") : r.slip.status === "final" ? "Final" : "Draft") },
       { label: "Emailed to", get: (r) => (r.slip ? r.slip.emailed_to : "") },
     ]);

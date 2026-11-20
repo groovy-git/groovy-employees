@@ -81,15 +81,63 @@ function daysLabel_(n) {
     return n === 0.5 ? "half day" : n + (n === 1 ? " day" : " days");
 }
 
-/** What the days off came to: "3 (1 paid holiday, 2 unpaid)", "1 (paid holiday)", "0 (holiday not taken, paid extra)". */
+/**
+ * What the days off came to: "3 (1 paid holiday, 2 unpaid)", "1 (paid holiday)", "0 (holiday not taken, paid extra)",
+ * and — half a holiday left beside a whole unpaid day — "1.5 (0.5 paid, 1 unpaid, half day of holiday not taken, paid extra)".
+ */
 function daysOffNote_(s) {
     const off = s.days_off;
     const paid = s.paid_holidays;
-    const unused = Math.max(0, r2_(paid - off));
+    const unpaid = s.unpaid_days;
+    const used = Math.max(0, r2_(off - unpaid));
+    const unused = Math.max(0, r2_(paid - used));
     if (!paid) return off + (off ? " (unpaid)" : "");
-    if (s.unpaid_days > 0) return off + " (" + paid + " paid holiday" + (paid === 1 ? "" : "s") + ", " + s.unpaid_days + " unpaid)";
+    if (unpaid > 0 && unused > 0) return off + " (" + used + " paid, " + unpaid + " unpaid, " + daysLabel_(unused) + " of holiday not taken, paid extra)";
+    if (unpaid > 0) return off + " (" + paid + " paid holiday" + (paid === 1 ? "" : "s") + ", " + unpaid + " unpaid)";
     if (unused > 0) return off + " (" + (off ? daysLabel_(unused) + " of holiday" : "holiday") + " not taken, paid extra)";
     return off + " (paid holiday" + (paid === 1 ? "" : "s") + ")";
+}
+
+// 1 → "1st", 2 → "2nd", 3 → "3rd", 11 → "11th", 22 → "22nd"
+function ordinal_(n) {
+    const t = n % 100;
+    return n + (t >= 11 && t <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th");
+}
+
+// the dates marked on a slip, by kind, in the order they are printed
+const MARK_LABELS_ = [
+    ["paid", "Paid off"],
+    ["paid_half", "Paid ½ off"],
+    ["unpaid", "Unpaid off"],
+    ["unpaid_half", "Unpaid ½ off"],
+    ["event", "Event days"],
+];
+
+/** [[label, ["2nd", "24th"]], …] for each kind with dates marked — none for a slip without dates. */
+function markLines_(s) {
+    const marks = s.day_marks || {};
+    const days = Object.keys(marks).map(Number).sort((a, b) => a - b);
+    return MARK_LABELS_.map((k) => [k[1], days.filter((d) => marks[d] === k[0]).map(ordinal_)]).filter((l) => l[1].length);
+}
+
+// "  Unpaid off : 3rd, 25th" — dates past the slip's width carry on below, lined up under the first
+function datesRows_(prefix, dates) {
+    const indent = new Array(prefix.length + 1).join(" ");
+    const rows = [];
+    let row = prefix;
+    let fresh = true; // nothing after the prefix yet
+    dates.forEach((d, i) => {
+        const piece = d + (i < dates.length - 1 ? "," : "");
+        if (!fresh && (row + " " + piece).length > TEXT_WIDTH_) {
+            rows.push(row);
+            row = indent;
+            fresh = true;
+        }
+        row += (fresh ? "" : " ") + piece;
+        fresh = false;
+    });
+    rows.push(row);
+    return rows;
 }
 
 /**
@@ -118,6 +166,54 @@ function textRow_(label, amount) {
     return label + (gap >= 2 ? new Array(gap + 1).join(" ") : "  ") + amount;
 }
 
+// the dates of each kind of day off, indented under "Days off": "  Unpaid off : 3rd, 25th" — only for a
+// slip from before slips kept their days (daysRows_ lines them up with the rest of its block)
+function offMarkRows_(marked) {
+    const off = marked.filter((l) => l[0] !== "Event days");
+    const width = Math.max.apply(null, off.map((l) => l[0].length).concat(0));
+    const rows = [];
+    off.forEach((l) => datesRows_("  " + l[0] + new Array(width - l[0].length + 1).join(" ") + " : ", l[1]).forEach((r) => rows.push(r)));
+    return rows;
+}
+
+// "(from 10th)", "(to 20th)", "(10th to 20th)" when the days employed were part of the month
+function spanNote_(span, month) {
+    const whole = daysInMonth_(month);
+    if (span.from > 1 && span.to < whole) return " (" + ordinal_(span.from) + " to " + ordinal_(span.to) + ")";
+    if (span.from > 1) return " (from " + ordinal_(span.from) + ")";
+    if (span.to < whole) return " (to " + ordinal_(span.to) + ")";
+    return "";
+}
+
+/**
+ * The slip's days, as the text prints them:
+ *   Number of days : 30
+ *   Worked days    : 26
+ *   Days off       : 4 (1 paid holiday, 3 unpaid)
+ *   Paid off       : 2nd                              ← the dates of each kind marked, lined up
+ *   Unpaid off     : 3rd, 25th
+ *   Unpaid ½ off   : 4th, 27th
+ *   Paid days      : 27 (30 - 3 unpaid)
+ *   Event days     : 5th, 12th                         ← when the dates were marked
+ * Someone paid per event day worked their event days, and has no days off and no paid days.
+ */
+function daysRows_(s, span) {
+    const label = (l) => l + new Array(14 - l.length + 1).join(" ") + " : ";
+    const d = slipDays_(s);
+    const marked = markLines_(s);
+    const eventMarked = marked.filter((l) => l[0] === "Event days")[0];
+    const rows = [label("Number of days") + span.days + spanNote_(span, s.month)];
+    if (payTypeOf_(s) !== "event") {
+        rows.push(label("Worked days") + d.worked_days);
+        rows.push(label("Days off") + daysOffNote_(s));
+        // the dates of each kind, in the same column as everything else in the block
+        marked.filter((l) => l[0] !== "Event days").forEach((l) => datesRows_(label(l[0]), l[1]).forEach((r) => rows.push(r)));
+        rows.push(label("Paid days") + d.paid_days + (s.unpaid_days > 0 ? " (" + span.days + " - " + s.unpaid_days + " unpaid)" : ""));
+    } else rows.push(label("Worked days") + d.worked_days + " (event days)");
+    if (eventMarked) datesRows_(label("Event days"), eventMarked[1]).forEach((r) => rows.push(r));
+    return rows;
+}
+
 function slipText_(s, items) {
     const biz = settingsMap_();
     const sym = biz.currency_symbol;
@@ -135,7 +231,21 @@ function slipText_(s, items) {
     lines.push("Role     : " + s.designation);
     if (s.location) lines.push("Location : " + s.location);
     if (s.doj) lines.push("Joined   : " + niceDate_(s.doj));
-    if (monthly) lines.push("Days off : " + daysOffNote_(s));
+    const span = slipSpan_(s);
+    if (span) {
+        // the days, in a block of their own: Number of days, Worked days, Days off, Paid days, Event days
+        lines.push("");
+        daysRows_(s, span).forEach((r) => lines.push(r));
+    } else {
+        // a slip from before slips kept their days: as it always read
+        const marked = markLines_(s);
+        const eventMarked = marked.filter((l) => l[0] === "Event days")[0];
+        if (monthly) {
+            lines.push("Days off : " + daysOffNote_(s));
+            offMarkRows_(marked).forEach((r) => lines.push(r));
+        }
+        if (eventMarked) datesRows_("Event days : ", eventMarked[1]).forEach((r) => lines.push(r));
+    }
     lines.push("");
     lines.push("EARNINGS");
     if (monthly) lines.push(textRow_("Base salary", m(s.base_salary)));
@@ -237,6 +347,9 @@ function slipPdfHtml_(s, items) {
     const deductions = items.filter((i) => i.kind === "deduction");
     const monthly = payTypeOf_(s) !== "event";
     const eventDays = s.event_days || 0;
+    const marked = markLines_(s);
+    const span = slipSpan_(s); // null for a slip from before slips kept their days
+    const days = slipDays_(s);
     const row = (label, amount, bold) =>
         "<tr><td" + (bold ? ' class="b"' : "") + ">" + e(label) + '</td><td class="n' + (bold ? " b" : "") + '">' + amount + "</td></tr>";
     const table = (title, rows, totalLabel, total) =>
@@ -273,8 +386,26 @@ function slipPdfHtml_(s, items) {
         cell("Employee", "<b>" + e(s.employee_name) + "</b><br>Emp No. " + e(s.emp_no)) +
         cell("Role", e(s.designation) + (s.location ? "<br>" + e(s.location) : "")) +
         cell("Date of joining", e(niceDate_(s.doj))) +
-        (monthly ? cell("Days off", e(daysOffNote_(s))) : cell("Event days", e(eventDays + (eventDays === 1 ? " day" : " days")))) +
+        (span
+            ? // the days: Number of days beside the employee, then worked / off / paid / event days under it
+              cell("Number of days", e(span.days + spanNote_(span, s.month))) +
+              "</tr><tr>" +
+              (monthly
+                  ? cell("Worked days", e(days.worked_days)) +
+                    cell("Days off", e(daysOffNote_(s))) +
+                    cell("Paid days", e(days.paid_days + (s.unpaid_days > 0 ? " (" + span.days + " - " + s.unpaid_days + " unpaid)" : ""))) +
+                    cell("Event days", e(eventDays ? eventDays + (eventDays === 1 ? " day" : " days") : "None"))
+                  : cell("Worked days", e(days.worked_days + (days.worked_days === 1 ? " event day" : " event days"))) + '<td colspan="3"></td>')
+            : monthly
+              ? cell("Days off", e(daysOffNote_(s)))
+              : cell("Event days", e(eventDays + (eventDays === 1 ? " day" : " days")))) +
         "</tr></table>" +
+        // the dates, when they were marked: "Paid off: 2nd, 24th · Unpaid off: 3rd · Event days: 5th"
+        (marked.length
+            ? '<table><tr><td style="padding:5px 7px;border:1px solid #e7ded2;border-top:0;font-size:10.5px"><div class="lbl">Dates</div>' +
+              marked.map((l) => "<b>" + e(l[0]) + ":</b> " + e(l[1].join(", "))).join(" &nbsp;·&nbsp; ") +
+              "</td></tr></table>"
+            : "") +
         '<table style="margin-top:14px"><tr>' +
         '<td style="width:50%;padding-right:7px">' +
         table("Earnings", (monthly ? [row("Base salary", m(s.base_salary))] : []).concat(earnings.map((i) => row(lineLabel_(i, s, sym), m(i.amount)))), "Total earnings", r2_(s.base_salary + s.earnings_total)) +

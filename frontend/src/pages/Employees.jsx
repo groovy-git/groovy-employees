@@ -26,7 +26,7 @@ export default function Employees() {
     return (list || [])
       .filter((e) => {
         if (show !== "all" && (e.status === "left") !== (show === "left")) return false;
-        const hay = `${e.name} ${e.designation} ${e.location} ${e.phone} emp no ${e.emp_no}`.toLowerCase();
+        const hay = `${e.name} ${e.designation} ${e.location} ${e.phone} ${e.alt_phone || ""} emp no ${e.emp_no}`.toLowerCase();
         return words.every((w) => hay.includes(w));
       })
       // by Emp No., lowest first (as numbers: 10 comes after 9); on the All tab, those who have left

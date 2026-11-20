@@ -238,7 +238,11 @@ const want = [
     "Role     : Salesperson Kiosk",
     "Location : Kondhwa",
     "Joined   : 12 Jan 2024",
-    "Days off : 3 (1 paid holiday, 2 unpaid)",
+    "",
+    "Number of days : 30",
+    "Worked days    : 27",
+    "Days off       : 3 (1 paid holiday, 2 unpaid)",
+    "Paid days      : 28 (30 - 2 unpaid)",
     "",
     "EARNINGS",
     "Base salary                    ₹15,000",
@@ -266,9 +270,9 @@ check("lines kept when none are sent", d.items.length === 4, d.items);
 // days off, every way round
 d = ok(call("saveSlip", { id: slipId, days_off: 0 }, T), "no day off");
 check("holiday not taken → +500", d.items.find((i) => i.category === "Holiday not taken").amount === 500 && !d.items.find((i) => i.category === "Unpaid leave") && d.slip.net_salary === 15000 + 2050 + 500 - 2000, d);
-check("days-off note: holiday not taken", /Days off : 0 \(holiday not taken, paid extra\)/.test(d.text), d.text);
+check("days-off note: holiday not taken", /Days off +: 0 \(holiday not taken, paid extra\)/.test(d.text) && /Worked days +: 30\n/.test(d.text), d.text);
 d = ok(call("saveSlip", { id: slipId, days_off: 1 }, T), "one day off");
-check("holiday taken → neither line", d.items.every((i) => !i.auto) && /Days off : 1 \(paid holiday\)/.test(d.text), d);
+check("holiday taken → neither line", d.items.every((i) => !i.auto) && /Days off +: 1 \(paid holiday\)/.test(d.text), d);
 d = ok(call("saveSlip", { id: slipId, days_off: 1.5 }, T), "one and a half days off");
 check("half day unpaid → 250", d.items.find((i) => i.auto).amount === 250 && /Unpaid leave \(half day\)/.test(d.text), d);
 d = ok(call("saveSlip", { id: slipId, days_off: 3, leave_amount: 800 }, T), "leave amount typed over");
@@ -613,6 +617,9 @@ run(`SpreadsheetApp.getUi = () => { throw new Error("no UI in tests"); }`);
         "Role     : Salesperson Event",
         "Joined   : 1 Mar 2025",
         "",
+        "Number of days : 30",
+        "Worked days    : 5 (event days)",
+        "",
         "EARNINGS",
         row("Event pay (5 days × ₹800)", "₹4,000"),
         row("Travel", "₹300"),
@@ -631,7 +638,7 @@ run(`SpreadsheetApp.getUi = () => { throw new Error("no UI in tests"); }`);
     d = ok(fin, "finalize the event slip");
     const pdf = ev.drive.items.get(/\/d\/([^/]+)/.exec(d.slip.pdf_url)[1]);
     check("filed like any slip", pathOf(pdf) === "My Drive/GBG/Groovy Employees/Salary_Slips/FY 2026-27/09/4-Ayesha-2026-09.pdf" && /Emailed to ayesha@example\.com/.test(fin.message), pathOf(pdf));
-    check("PDF: event days, the event line, no base and no days off", ["Event days", "5 days", "Event pay (5 days × ₹800)", "₹3,300", "Travel"].every((x) => pdf.html.indexOf(x) >= 0) && !/Base salary/.test(pdf.html) && !/Days off/i.test(pdf.html), pdf.html);
+    check("PDF: event days worked, the event line, no base, no days off, no paid days", ["Number of days", "Worked days", "5 event days", "Event pay (5 days × ₹800)", "₹3,300", "Travel"].every((x) => pdf.html.indexOf(x) >= 0) && !/Base salary/.test(pdf.html) && !/Days off/i.test(pdf.html) && !/Paid days/.test(pdf.html), pdf.html.slice(-1500));
     check("the email is the same slip", ev.mails[ev.mails.length - 1].body.indexOf(want) > 0);
 
     // ---- someone on a monthly salary who also worked two event days ----
@@ -639,7 +646,7 @@ run(`SpreadsheetApp.getUi = () => { throw new Error("no UI in tests"); }`);
     d = ok(call2("saveSlip", { id: sSlip, event_days: 2, days_off: 3 }), "Sameer: two event days and three days off");
     check("base, event pay at his rate, and unpaid leave together", d.slip.pay_type === "monthly" && d.slip.base_salary === 18000 && cat(d, "Event pay").amount === 1400 && cat(d, "Unpaid leave").amount === 1200 && d.slip.net_salary === 18000 + 1400 - 1200, d);
     const lines = d.text.split("\n");
-    check("his slip keeps the base row, with event pay after it", lines.indexOf(row("Base salary", "₹18,000")) > 0 && lines.indexOf(row("Event pay (2 days × ₹700)", "₹1,400")) === lines.indexOf(row("Base salary", "₹18,000")) + 1 && /Days off : 3 \(1 paid holiday, 2 unpaid\)/.test(d.text), d.text);
+    check("his slip keeps the base row, with event pay after it", lines.indexOf(row("Base salary", "₹18,000")) > 0 && lines.indexOf(row("Event pay (2 days × ₹700)", "₹1,400")) === lines.indexOf(row("Base salary", "₹18,000")) + 1 && /Days off +: 3 \(1 paid holiday, 2 unpaid\)/.test(d.text), d.text);
     d = ok(call2("saveSlip", { id: sSlip, event_days: 0 }), "no event days after all");
     check("the event line goes", !cat(d, "Event pay") && d.slip.net_salary === 18000 - 1200, d.items);
     ok(call2("finalizeSlip", { id: sSlip }), "finalize Sameer");
@@ -664,12 +671,249 @@ run(`SpreadsheetApp.getUi = () => { throw new Error("no UI in tests"); }`);
     check("it is dropped from the list", ok(call2("getSettings", {}), "settings").earning_types === "Bonus");
 }
 
+/* ================= an alternative number, and paid holidays of their own ================= */
+{
+    const ph = createEnv();
+    ph.drive.make("folder", "Groovy Kiosk", ph.drive.make("folder", "GBG", ph.drive.root));
+    ph.ctx.setupSheets();
+    const t = ph.call("login", { email: "owner@groovy.test", password: /Password: (\S+)/.exec(ph.alerts.pop())[1] }).data.token;
+    const call3 = (action, payload) => ph.call(action, payload, t);
+    const person = (o) => Object.assign({ designation: "Salesperson Kiosk", doj: "2024-01-12", base_salary: 15000 }, o);
+    const cat = (d, c) => d.items.find((i) => i.category === c);
+
+    // ---- the profile ----
+    const usual = ok(call3("saveEmployee", person({ emp_no: 1, name: "Usual Holidays" })), "add someone with the usual holidays");
+    check("blank paid holidays and alternative number by default", usual.paid_holidays === "" && usual.alt_phone === "", usual);
+    refused(call3("saveEmployee", person({ emp_no: 2, name: "Bad", paid_holidays: "-1" })), "paid holidays cannot be negative", /Paid holidays a month/);
+    refused(call3("saveEmployee", person({ emp_no: 2, name: "Bad", paid_holidays: "1.3" })), "paid holidays in whole or half days", /Paid holidays a month/);
+    refused(call3("saveEmployee", person({ emp_no: 2, name: "Bad", paid_holidays: "40" })), "no more than 31 paid holidays", /Paid holidays a month/);
+    refused(call3("saveEmployee", person({ emp_no: 2, name: "Bad", paid_holidays: "two" })), "paid holidays must be a number", /Paid holidays a month/);
+    const two = ok(call3("saveEmployee", person({ emp_no: 2, name: "Two Holidays", phone: "09876543210", alt_phone: " 02026543210 ", paid_holidays: " 2 " })), "add someone with 2 paid holidays and a second number");
+    check("saved as typed: second number keeps its leading zero", two.alt_phone === "02026543210" && two.paid_holidays === "2" && two.phone === "09876543210", two);
+    const listed = ok(call3("listEmployees", {}), "list").find((e) => e.id === two.id);
+    check("and reads back from the sheet the same", listed.alt_phone === "02026543210" && listed.paid_holidays === "2", listed);
+    const none = ok(call3("saveEmployee", person({ emp_no: 3, name: "No Holidays", paid_holidays: "0" })), "add someone with no paid holidays");
+    check("0 is kept as 0, not as blank", none.paid_holidays === "0", none);
+    const half = ok(call3("saveEmployee", person({ emp_no: 4, name: "Half Holidays", paid_holidays: "1.5" })), "half days");
+    check("1.5 is kept", half.paid_holidays === "1.5", half);
+    check("a change of paid holidays is logged", ok(call3("listLogs", { q: "two holidays" }), "logs").some((l) => /2 paid holidays a month/.test(l.details)));
+
+    // ---- their slips ----
+    let d = ok(call3("saveSlip", { employee_id: two.id, month: "2026-09" }), "a slip for the one with 2");
+    check("the slip has their 2 paid holidays, taken: nothing added or deducted", d.slip.paid_holidays === 2 && d.slip.days_off === 2 && d.items.length === 0 && d.slip.net_salary === 15000, d.slip);
+    d = ok(call3("saveSlip", { id: d.slip.id, days_off: 3 }), "3 days off");
+    check("3 days off is 1 unpaid", d.slip.unpaid_days === 1 && cat(d, "Unpaid leave").amount === 500 && d.slip.net_salary === 14500, d);
+    check("the slip text says 2 paid holidays", /Days off +: 3 \(2 paid holidays, 1 unpaid\)/.test(d.text), d.text);
+    d = ok(call3("saveSlip", { id: d.slip.id, days_off: 0 }), "no days off");
+    check("2 holidays not taken are paid extra", cat(d, "Holiday not taken").amount === 1000 && d.slip.net_salary === 16000, d);
+    d = ok(call3("saveSlip", { employee_id: usual.id, month: "2026-09" }), "a slip for the one with the usual");
+    check("blank uses the number in Settings", d.slip.paid_holidays === 1 && d.slip.days_off === 1, d.slip);
+    d = ok(call3("saveSlip", { employee_id: none.id, month: "2026-09" }), "a slip for the one with none");
+    check("0 means every day off is unpaid", d.slip.paid_holidays === 0 && d.slip.days_off === 0 && d.slip.net_salary === 15000, d.slip);
+    ok(call3("prepareMonth", { month: "2026-09" }), "prepare the rest of the month");
+    const halfId = ok(call3("listMonth", { month: "2026-09" }), "month").rows.find((r) => r.employee.id === half.id).slip.id;
+    const halfSlip = ok(call3("getSlip", { id: halfId }), "their prepared slip").slip;
+    check("Prepare drafts uses their own number too", halfSlip.paid_holidays === 1.5 && halfSlip.days_off === 1.5 && halfSlip.net_salary === 15000, halfSlip);
+
+    // a change to the profile leaves the slips already made alone, and applies to the next one
+    const twoSlip = ok(call3("listMonth", { month: "2026-09" }), "month").rows.find((r) => r.employee.id === two.id).slip;
+    ok(call3("saveEmployee", Object.assign({}, two, { paid_holidays: "3" })), "give them 3");
+    check("their September draft keeps 2", ok(call3("getSlip", { id: twoSlip.id }), "slip").slip.paid_holidays === 2);
+    check("their August slip has 3", ok(call3("saveSlip", { employee_id: two.id, month: "2026-08" }), "August").slip.paid_holidays === 3);
+    ok(call3("saveEmployee", Object.assign({}, two, { paid_holidays: "" })), "back to the usual");
+    check("cleared, they follow Settings again", ok(call3("saveSlip", { employee_id: two.id, month: "2026-07" }), "July").slip.paid_holidays === 1);
+    ok(call3("saveSettings", { settings: { paid_holidays: "2" } }), "Settings to 2");
+    check("and pick up a change in Settings", ok(call3("saveSlip", { employee_id: two.id, month: "2026-06" }), "June").slip.paid_holidays === 2);
+    check("while someone with their own number keeps it", ok(call3("saveSlip", { employee_id: none.id, month: "2026-06" }), "June").slip.paid_holidays === 0);
+
+    // someone paid per event day has no holiday rule, whatever their profile says
+    const ev = ok(call3("saveEmployee", person({ emp_no: 9, name: "Event Holidays", designation: "Salesperson Event", pay_type: "event", day_rate: 800, paid_holidays: "2" })), "per event day, with paid holidays sent");
+    d = ok(call3("saveSlip", { employee_id: ev.id, month: "2026-09", event_days: 3 }), "their slip");
+    check("their slip has no paid holidays", d.slip.paid_holidays === 0 && d.slip.days_off === 0 && !cat(d, "Holiday not taken") && d.slip.net_salary === 2400, d.slip);
+}
+
+/* ================= days off by kind, and by date ================= */
+{
+    const dz = createEnv();
+    dz.drive.make("folder", "Groovy Kiosk", dz.drive.make("folder", "GBG", dz.drive.root));
+    dz.ctx.setupSheets();
+    const t = dz.call("login", { email: "owner@groovy.test", password: /Password: (\S+)/.exec(dz.alerts.pop())[1] }).data.token;
+    const c4 = (action, payload) => dz.call(action, payload, t);
+    const dzRun = (code) => vm.runInContext(code, dz.ctx);
+    const person = (o) => Object.assign({ designation: "Salesperson Kiosk", doj: "2024-01-12", base_salary: 15000 }, o);
+    const cat = (d, c) => d.items.find((i) => i.category === c);
+    const counts = (d) => [d.slip.paid_off, d.slip.paid_half, d.slip.unpaid_off, d.slip.unpaid_half];
+    const off = (po, ph, uo, uh) => ({ paid_off: po, paid_half: ph, unpaid_off: uo, unpaid_half: uh });
+
+    const one = ok(c4("saveEmployee", person({ emp_no: 1, name: "One Holiday" })), "add someone with 1 paid holiday");
+    const two = ok(c4("saveEmployee", person({ emp_no: 2, name: "Two Holidays", paid_holidays: "2" })), "add someone with 2");
+    const ev = ok(c4("saveEmployee", person({ emp_no: 3, name: "Event Only", designation: "Salesperson Event", pay_type: "event", day_rate: 800 })), "add someone paid per event day");
+
+    // ---- typed counts ----
+    let d = ok(c4("saveSlip", { employee_id: one.id, month: "2026-09" }), "a new draft");
+    const oneId = d.slip.id;
+    check("a new draft has its paid holiday taken, and no dates", counts(d).join() === "1,0,0,0" && JSON.stringify(d.slip.day_marks) === "{}" && d.slip.net_salary === 15000, d.slip);
+    d = ok(c4("saveSlip", Object.assign({ id: oneId }, off(1, 0, 2, 0))), "1 paid + 2 unpaid");
+    check("2 unpaid days deducted", d.slip.days_off === 3 && d.slip.unpaid_days === 2 && cat(d, "Unpaid leave").amount === 1000 && d.slip.net_salary === 14000 && counts(d).join() === "1,0,2,0", d.slip);
+    d = ok(c4("saveSlip", Object.assign({ id: oneId }, off(0, 2, 0, 0))), "2 paid half days");
+    check("2 paid half days use the paid holiday: nothing added or deducted", d.slip.days_off === 1 && d.items.length === 0 && d.slip.net_salary === 15000, d);
+    check("and the slip says so", /Days off +: 1 \(paid holiday\)/.test(d.text), d.text);
+    refused(c4("saveSlip", Object.assign({ id: oneId }, off(2, 0, 0, 0))), "paid over the paid holidays", /can't be more than the 1 paid holiday$/);
+    refused(c4("saveSlip", Object.assign({ id: oneId }, off(1, 1, 0, 0))), "paid half days count against them too", /can't be more than the 1 paid holiday/);
+    refused(c4("saveSlip", Object.assign({ id: oneId }, off(0, 0, 1, 0))), "unpaid while a paid holiday is left", /Use the paid holidays first: 1 day left/);
+    refused(c4("saveSlip", Object.assign({ id: oneId }, off(0, 1, 0, 1))), "unpaid half day while half a holiday is left", /Use the paid holidays first: half day left/);
+    refused(c4("saveSlip", Object.assign({ id: oneId }, off(1, 0, 1.5, 0))), "counts are whole numbers", /whole days and half days/);
+    refused(c4("saveSlip", Object.assign({ id: oneId }, off(1, 0, 31, 0))), "no more than 31 days off", /more than 31/);
+    d = ok(c4("saveSlip", Object.assign({ id: oneId }, off(0, 1, 1, 0))), "half a holiday left beside a whole unpaid day");
+    check("a day deducted, half a day paid extra", cat(d, "Unpaid leave").amount === 500 && cat(d, "Holiday not taken").amount === 250 && d.slip.net_salary === 14750, d);
+    check("the editor gets the half day's worked-out amount", d.auto.holiday_amount === 250 && d.auto.leave_amount === 500, d.auto);
+    check("the slip says what it came to", /Days off +: 1\.5 \(0\.5 paid, 1 unpaid, half day of holiday not taken, paid extra\)/.test(d.text), d.text);
+    d = ok(c4("saveSlip", { id: oneId, days_off: 2.5 }), "an app from before sends a total");
+    check("a total is split, paid first", counts(d).join() === "1,0,1,1" && d.slip.unpaid_days === 1.5 && cat(d, "Unpaid leave").amount === 750, d.slip);
+    d = ok(c4("saveSlip", { id: oneId, notes: "only a note" }), "save with no days off sent");
+    check("the counts stay", counts(d).join() === "1,0,1,1", d.slip);
+
+    // ---- dates ----
+    d = ok(c4("saveSlip", { employee_id: two.id, month: "2026-09" }), "a draft for the one with 2");
+    const twoId = d.slip.id;
+    check("their draft has 2 paid days taken", counts(d).join() === "2,0,0,0", d.slip);
+    const marks = { 2: "paid", 24: "paid", 3: "unpaid", 25: "unpaid", 4: "unpaid_half", 27: "unpaid_half", 5: "event", 12: "event", 31: "paid", 6: "nap" };
+    d = ok(c4("saveSlip", Object.assign({ id: twoId, day_marks: marks, event_days: 9, event_rate: 800 }, off(0, 0, 0, 0))), "mark the dates");
+    check("the dates decide the counts, not the numbers sent", counts(d).join() === "2,0,2,2" && d.slip.days_off === 5 && d.slip.unpaid_days === 3, d.slip);
+    check("and the event days", d.slip.event_days === 2 && cat(d, "Event pay").amount === 1600, d.slip);
+    check("the money", cat(d, "Unpaid leave").amount === 1500 && d.slip.net_salary === 15000 - 1500 + 1600, d.slip);
+    check("a date outside the month and an unknown mark are dropped", JSON.stringify(d.slip.day_marks) === JSON.stringify({ 2: "paid", 3: "unpaid", 4: "unpaid_half", 5: "event", 12: "event", 24: "paid", 25: "unpaid", 27: "unpaid_half" }), d.slip.day_marks);
+    const text = d.text.split("\n");
+    const at = text.indexOf("Days off       : 5 (2 paid holidays, 3 unpaid)");
+    check(
+        "the slip lists the dates under Days off, then the event days",
+        at > 0 &&
+            text[at + 1] === "Paid off       : 2nd, 24th" &&
+            text[at + 2] === "Unpaid off     : 3rd, 25th" &&
+            text[at + 3] === "Unpaid ½ off   : 4th, 27th" &&
+            text[at + 4] === "Paid days      : 27 (30 - 3 unpaid)" &&
+            text[at + 5] === "Event days     : 5th, 12th" &&
+            text[at + 6] === "" &&
+            text[at - 1] === "Worked days    : 25" &&
+            text[at - 2] === "Number of days : 30",
+        text.slice(at - 2, at + 7),
+    );
+    const html = dzRun(`resetReqCache_(), slipPdfHtml_(findBy_("Salary_Slips", "id", ${twoId}), itemsOf_(${twoId}))`);
+    check("the PDF lists them too", /<b>Paid off:<\/b> 2nd, 24th/.test(html) && /<b>Unpaid ½ off:<\/b> 4th, 27th/.test(html) && /<b>Event days:<\/b> 5th, 12th/.test(html), html.slice(0, 200));
+    d = ok(c4("saveSlip", { id: twoId, notes: "kept" }), "save without sending the dates");
+    check("the dates stay, and still decide", counts(d).join() === "2,0,2,2" && d.slip.event_days === 2 && d.slip.day_marks[24] === "paid", d.slip);
+    refused(c4("saveSlip", { id: twoId, day_marks: { 2: "paid", 3: "unpaid" } }), "dates break the rules like counts do", /Use the paid holidays first: 1 day left/);
+    refused(c4("saveSlip", { id: twoId, day_marks: { 2: "paid", 3: "paid", 4: "paid" } }), "three paid dates against two paid holidays", /more than the 2 paid holidays/);
+
+    // a long list carries on below, lined up, within the slip's width
+    const many = { 1: "paid", 2: "paid" };
+    for (let i = 3; i <= 22; i++) many[i] = "unpaid";
+    d = ok(c4("saveSlip", { id: twoId, day_marks: many }), "20 unpaid days");
+    const rows = d.text.split("\n");
+    const first = rows.findIndex((r) => r.startsWith("Unpaid off     : "));
+    const block = [rows[first]].concat(rows.slice(first + 1).filter((r, i, all) => all.slice(0, i + 1).every((x) => x.startsWith("                 "))));
+    check(
+        "long lists wrap within 38 characters, lined up",
+        first > 0 && block.length > 1 && block.every((r) => r.length <= 38) && block.join(" ").replace(/\s+/g, " ").includes("3rd, 4th, 5th") && block[block.length - 1].trim().endsWith("22nd"),
+        block,
+    );
+
+    // clearing the dates: the numbers sent count again
+    d = ok(c4("saveSlip", Object.assign({ id: twoId, day_marks: {}, event_days: 2 }, off(2, 0, 1, 0))), "clear the dates");
+    check("no dates, and the counts typed", JSON.stringify(d.slip.day_marks) === "{}" && counts(d).join() === "2,0,1,0" && d.slip.event_days === 2 && !/Paid off/.test(d.text), d.slip);
+
+    // finalized, the dates are on the slip for good
+    ok(c4("saveSlip", { id: twoId, day_marks: { 9: "paid", 10: "paid", 11: "unpaid" } }), "mark again");
+    d = ok(c4("finalizeSlip", { id: twoId }), "finalize");
+    check("a final slip keeps its dates", /\nPaid off       : 9th, 10th\n/.test(d.text) && /\nUnpaid off     : 11th\n/.test(d.text) && d.slip.status === "final", d.text);
+
+    // ---- someone paid per event day ----
+    d = ok(c4("saveSlip", { employee_id: ev.id, month: "2026-09", day_marks: { 2: "paid", 5: "event", 6: "event", 7: "event" } }), "their slip, with dates");
+    check("only event dates are kept for them", JSON.stringify(d.slip.day_marks) === JSON.stringify({ 5: "event", 6: "event", 7: "event" }) && counts(d).join() === "0,0,0,0", d.slip);
+    check("3 event dates → 3 days paid", d.slip.event_days === 3 && d.slip.net_salary === 2400, d.slip);
+    check("their slip lists the event days, with no days off", /\nWorked days    : 3 \(event days\)\nEvent days     : 5th, 6th, 7th\n/.test(d.text) && !/Days off/.test(d.text) && !/Paid days/.test(d.text), d.text);
+
+    // ---- Prepare drafts ----
+    ok(c4("prepareMonth", { month: "2026-08" }), "prepare August");
+    const aug = ok(c4("listMonth", { month: "2026-08" }), "August").rows.find((r) => r.employee.id === two.id).slip;
+    d = ok(c4("getSlip", { id: aug.id }), "their prepared draft");
+    check("a prepared draft has the paid holidays taken, no dates", counts(d).join() === "2,0,0,0" && JSON.stringify(d.slip.day_marks) === "{}" && d.slip.net_salary === 15000, d.slip);
+}
+
+/* ================= number of days, worked days, paid days ================= */
+{
+    const nd = createEnv();
+    nd.drive.make("folder", "Groovy Kiosk", nd.drive.make("folder", "GBG", nd.drive.root));
+    nd.ctx.setupSheets();
+    const t = nd.call("login", { email: "owner@groovy.test", password: /Password: (\S+)/.exec(nd.alerts.pop())[1] }).data.token;
+    const c5 = (action, payload) => nd.call(action, payload, t);
+    const ndRun = (code) => vm.runInContext(code, nd.ctx);
+    const person = (o) => Object.assign({ designation: "Salesperson Kiosk", doj: "2024-01-12", base_salary: 15000 }, o);
+    const off = (po, ph, uo, uh) => ({ paid_off: po, paid_half: ph, unpaid_off: uo, unpaid_half: uh });
+    const has = (d, line) => d.text.split("\n").includes(line);
+
+    // ---- a whole month ----
+    const full = ok(c5("saveEmployee", person({ emp_no: 1, name: "Whole Month" })), "add someone here all month");
+    let d = ok(c5("saveSlip", { employee_id: full.id, month: "2026-09" }), "their September draft");
+    const fullId = d.slip.id;
+    check("a whole month: 1st to 30th", d.slip.from_day === 1 && d.slip.to_day === 30 && d.slip.month_days === 30, d.slip);
+    check("the holiday taken: 29 worked, 30 paid", has(d, "Number of days : 30") && has(d, "Worked days    : 29") && has(d, "Paid days      : 30") && d.slip.worked_days === 29 && d.slip.paid_days === 30, d.text);
+    d = ok(c5("saveSlip", Object.assign({ id: fullId }, off(1, 0, 2, 0))), "1 paid + 2 unpaid");
+    check("27 worked, 28 paid", has(d, "Worked days    : 27") && has(d, "Paid days      : 28 (30 - 2 unpaid)"), d.text);
+    d = ok(c5("saveSlip", Object.assign({ id: fullId }, off(1, 0, 1, 1))), "1 paid + 1.5 unpaid");
+    check("half days count half", has(d, "Worked days    : 27.5") && has(d, "Paid days      : 28.5 (30 - 1.5 unpaid)"), d.text);
+    const oct = ok(c5("saveSlip", { employee_id: full.id, month: "2026-10" }), "October");
+    check("October has 31 days", has(oct, "Number of days : 31") && has(oct, "Worked days    : 30"), oct.text);
+    const html = ndRun(`resetReqCache_(), slipPdfHtml_(findBy_("Salary_Slips", "id", ${fullId}), itemsOf_(${fullId}))`);
+    check("the PDF has the days", ["Number of days", "Worked days", "27.5", "Paid days", "28.5 (30 - 1.5 unpaid)"].every((x) => html.indexOf(x) >= 0), html.slice(-2500));
+    const row = ok(c5("listMonth", { month: "2026-09" }), "September").rows.find((r) => r.employee.id === full.id).slip;
+    check("the Payroll list has the days", row.month_days === 30 && row.worked_days === 27.5 && row.paid_days === 28.5, row);
+
+    // ---- joined on the 10th ----
+    const joiner = ok(c5("saveEmployee", person({ emp_no: 2, name: "New Joiner", doj: "2026-09-10" })), "add someone who joined on the 10th");
+    d = ok(c5("saveSlip", { employee_id: joiner.id, month: "2026-09", day_marks: { 5: "event", 12: "event" }, event_rate: 800 }), "their first slip");
+    const joinId = d.slip.id;
+    check("their days start on the 10th", d.slip.from_day === 10 && d.slip.to_day === 30 && has(d, "Number of days : 21 (from 10th)") && has(d, "Worked days    : 20"), d.text);
+    check("a date before they joined is dropped", JSON.stringify(d.slip.day_marks) === JSON.stringify({ 12: "event" }) && d.slip.event_days === 1, d.slip);
+    check("the editor gets their full base, for the part-month suggestion", d.employee.base_salary === 15000 && d.slip.base_salary === 15000, d.employee);
+    refused(c5("saveSlip", Object.assign({ id: joinId, day_marks: {} }, off(1, 0, 21, 0))), "more days off than days employed", /Days off can't be more than the number of days \(21\)/);
+    refused(c5("saveSlip", { id: joinId, day_marks: {}, event_days: 22 }), "more event days than days employed", /Event days can't be more than the number of days \(21\)/);
+    ok(c5("saveSlip", { id: joinId, base_salary: 10500 }), "use the part-month base");
+    check("the part-month base is kept, the days stay", ok(c5("getSlip", { id: joinId }), "slip").slip.base_salary === 10500);
+
+    // ---- left on the 20th, and both in one month ----
+    const leaver = ok(c5("saveEmployee", person({ emp_no: 3, name: "Leaver" })), "add someone who will leave");
+    ok(c5("setEmployeeStatus", { id: leaver.id, status: "left", dol: "2026-09-20" }), "they left on the 20th");
+    d = ok(c5("saveSlip", { employee_id: leaver.id, month: "2026-09" }), "their last slip");
+    check("their days end on the 20th", d.slip.from_day === 1 && d.slip.to_day === 20 && has(d, "Number of days : 20 (to 20th)") && has(d, "Worked days    : 19"), d.text);
+    const both = ok(c5("saveEmployee", person({ emp_no: 4, name: "Short Stay", doj: "2026-09-10" })), "add someone for a short stay");
+    ok(c5("setEmployeeStatus", { id: both.id, status: "left", dol: "2026-09-20" }), "gone on the 20th");
+    d = ok(c5("saveSlip", { employee_id: both.id, month: "2026-09" }), "their only slip");
+    check("10th to 20th", has(d, "Number of days : 11 (10th to 20th)"), d.text);
+    const last = ok(c5("saveEmployee", person({ emp_no: 5, name: "Last Day", doj: "2026-09-30", paid_holidays: "2" })), "add someone who joined on the 30th");
+    d = ok(c5("saveSlip", { employee_id: last.id, month: "2026-09" }), "their slip");
+    check("1 day employed: no more than 1 day off assumed", d.slip.days_off === 1 && has(d, "Number of days : 1 (from 30th)") && has(d, "Worked days    : 0"), d.text);
+
+    // ---- a final slip keeps its days, whatever happens to the profile ----
+    ok(c5("finalizeSlip", { id: fullId }), "finalize the whole-month slip");
+    ok(c5("setEmployeeStatus", { id: full.id, status: "left", dol: "2026-09-15" }), "then mark them as having left mid-September");
+    d = ok(c5("getSlip", { id: fullId }), "the final slip");
+    check("the final slip's days don't move", d.slip.to_day === 30 && has(d, "Number of days : 30"), d.text);
+    // a draft follows the profile, and can't be finalized with more days off than the days now employed
+    ok(c5("setEmployeeStatus", { id: leaver.id, status: "active" }), "the leaver is back");
+    d = ok(c5("saveSlip", { id: ok(c5("listMonth", { month: "2026-09" }), "month").rows.find((r) => r.employee.id === leaver.id).slip.id, notes: "back" }), "save their draft");
+    check("a draft follows the profile", d.slip.to_day === 30 && has(d, "Number of days : 30"), d.text);
+    ok(c5("saveSlip", Object.assign({ id: d.slip.id }, off(1, 0, 3, 0))), "4 days off");
+    ok(c5("setEmployeeStatus", { id: leaver.id, status: "left", dol: "2026-09-03" }), "they left on the 3rd after all");
+    refused(c5("finalizeSlip", { id: d.slip.id }), "finalizing with more days off than days employed", /Days off can't be more than the number of days \(3\)/);
+}
+
 /* ================= a sheet from before this update ================= */
 {
     // take the new columns out of the schema, set up, and add data the way the previous version did
     const old = createEnv();
     const oldRun = (code) => vm.runInContext(code, old.ctx);
-    oldRun(`var __new = { Employees: ["pay_type", "day_rate"], Salary_Slips: ["pay_type", "event_days", "event_rate"] }; var __types = {};
+    oldRun(`var __new = { Employees: ["pay_type", "day_rate", "alt_phone", "paid_holidays"], Salary_Slips: ["pay_type", "event_days", "event_rate", "paid_off", "paid_half", "unpaid_off", "unpaid_half", "day_marks", "from_day", "to_day"] }; var __types = {};
         Object.keys(__new).forEach((t) => __new[t].forEach((k) => { __types[t + "." + k] = SCHEMA[t][k]; delete SCHEMA[t][k]; }));
         var __w = [Object.keys(SCHEMA.Employees).length, Object.keys(SCHEMA.Salary_Slips).length]; // how wide the old tabs are`);
     old.ctx.setupSheets();
@@ -685,15 +929,20 @@ run(`SpreadsheetApp.getUi = () => { throw new Error("no UI in tests"); }`);
     check("before Setup is run, the app says to run it", old.call("listEmployees", {}, t).code === "SETUP" && /run Groovy Employees → 1\. Setup/.test(old.call("listMonth", { month: "2026-09" }, t).message));
     old.ctx.setupSheets();
     const said = old.alerts.pop();
-    check("Setup adds the columns and says so", /Employees \(\+pay_type, day_rate\)/.test(said) && /Salary_Slips \(\+pay_type, event_days, event_rate\)/.test(said), said);
+    check("Setup adds the columns and says so", /Employees \(\+pay_type, day_rate, alt_phone, paid_holidays\)/.test(said) && /Salary_Slips \(\+pay_type, event_days, event_rate, paid_off, paid_half, unpaid_off, unpaid_half, day_marks, from_day, to_day\)/.test(said), said);
     check("the rows already there are untouched", oldRun(snapshot) === before && before.length > 200);
     const e = ok(old.call("listEmployees", {}, t), "list after Setup")[0];
     check("an employee from before is on a monthly salary", e.pay_type === "monthly" && e.day_rate === 0 && e.base_salary === 15000, e);
+    check("with no second number, and the usual paid holidays", e.alt_phone === "" && e.paid_holidays === "", e);
     const d = ok(old.call("getSlip", { id: slip.slip.id }, t), "the old slip");
+    check("its days off are split by kind, paid first", [d.slip.paid_off, d.slip.paid_half, d.slip.unpaid_off, d.slip.unpaid_half].join() === "1,0,2,0" && JSON.stringify(d.slip.day_marks) === "{}" && d.auto.holiday_amount === 0, d.slip);
     check("the old slip reads as it did", d.slip.pay_type === "monthly" && d.slip.event_days === 0 && d.slip.net_salary === 14000 && /Base salary +₹15,000/.test(d.text) && /Days off : 3/.test(d.text) && !/Event pay/.test(d.text), d.text);
     check("and its month counts as before", ok(old.call("listMonth", { month: "2026-09" }, t), "month").summary.finals === 1);
     ok(old.call("saveEmployee", Object.assign({}, e, { phone: "9000000002" }), t), "edit them with the new version");
-    check("a new slip for them works", ok(old.call("saveSlip", { employee_id: e.id, month: "2026-08", event_days: 1, event_rate: 600 }, t), "new slip").slip.net_salary === 15600);
+    const s2 = ok(old.call("saveSlip", { employee_id: e.id, month: "2026-08", event_days: 1, event_rate: 600 }, t), "new slip").slip;
+    check("a new slip for them works, with the paid holidays from Settings", s2.net_salary === 15600 && s2.paid_holidays === 1, s2);
+    check("the old slip has no days block", !/Number of days/.test(d.text) && d.slip.month_days === "" && d.slip.worked_days === "", d.slip);
+    check("a new slip has one", /Number of days : 31\n/.test(ok(old.call("getSlip", { id: s2.id }, t), "the new slip").text));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

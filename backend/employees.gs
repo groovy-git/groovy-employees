@@ -49,14 +49,25 @@ function roleFor_(wanted, existing) {
 // how someone is paid, in a few words, for the activity log
 function payLine_(e) {
     if (payTypeOf_(e) === "event") return "per event day " + (e.day_rate || 0);
-    return "base salary " + e.base_salary + (e.day_rate ? ", event day " + e.day_rate : "");
+    const own = str_(e.paid_holidays);
+    return "base salary " + e.base_salary + (e.day_rate ? ", event day " + e.day_rate : "") + (own !== "" ? ", " + own + " paid holidays a month" : "");
+}
+
+// their own paid holidays a month as text: "" (use Settings) or a whole or half number of days
+function cleanPaidHolidays_(v) {
+    const raw = str_(v);
+    if (raw === "") return "";
+    const d = Number(raw);
+    if (isNaN(d) || d < 0 || d > 31 || !isHalfStep_(d)) fail_("Paid holidays a month must be 0 or more, in whole or half days");
+    return String(d);
 }
 
 function employeeOut_(e, slips) {
     return {
         id: e.id, emp_no: e.emp_no, name: e.name, designation: e.designation, location: e.location,
-        dob: e.dob, doj: e.doj, phone: e.phone, email: e.email, address: e.address,
+        dob: e.dob, doj: e.doj, phone: e.phone, alt_phone: e.alt_phone || "", email: e.email, address: e.address,
         base_salary: e.base_salary, pay_type: payTypeOf_(e), day_rate: e.day_rate || 0,
+        paid_holidays: str_(e.paid_holidays), // "" means the number in Settings
         recurring: e.recurring || [], status: e.status || "active", dol: e.dol,
         notes: e.notes, created_at: e.created_at, updated_at: e.updated_at,
         slips: slips || 0,
@@ -89,6 +100,7 @@ function apiSaveEmployee_(p, ctx) {
     const payType = p.pay_type === "event" ? "event" : "monthly";
     const base = payType === "event" ? 0 : r2_(num_(p.base_salary));
     const dayRate = r2_(num_(p.day_rate));
+    const paidHolidays = cleanPaidHolidays_(p.paid_holidays);
     if (!(empNo > 0) || Math.floor(empNo) !== empNo) fail_("Emp No. must be a whole number, 1 or more");
     if (!name) fail_("Name is required");
     if (!designation) fail_("Choose a role");
@@ -111,8 +123,8 @@ function apiSaveEmployee_(p, ctx) {
         const now = nowStr_();
         const fields = {
             emp_no: empNo, name, designation: roleFor_(designation, existing), location: str_(p.location), dob, doj,
-            phone: str_(p.phone).slice(0, 20), email, address: str_(p.address), base_salary: base,
-            pay_type: payType, day_rate: dayRate,
+            phone: str_(p.phone).slice(0, 20), alt_phone: str_(p.alt_phone).slice(0, 20), email, address: str_(p.address), base_salary: base,
+            pay_type: payType, day_rate: dayRate, paid_holidays: paidHolidays,
             recurring: cleanRecurring_(p.recurring), notes: str_(p.notes), updated_at: now,
         };
         if (p.id) {
